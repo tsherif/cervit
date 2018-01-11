@@ -17,10 +17,9 @@
 
 #define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
 
-// TODO(Tarek): Dynamic req/resp buffers
-// TODO(Tarek): Threads
 // TODO(Tarek): Check for leaving root dir.
 // TODO(Tarek): index.html default
+// TODO(Tarek): Threads
 
 int sock;
 
