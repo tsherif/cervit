@@ -15,12 +15,20 @@
 #define HTTP_CONTENT_TYPE_KEY "Content-Type: "
 #define HTTP_NEWLINE "\r\n"
 
+#define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
+
 // TODO(Tarek): Dynamic req/resp buffers
 // TODO(Tarek): Threads
 // TODO(Tarek): Check for leaving root dir.
 // TODO(Tarek): index.html default
 
 int sock;
+
+typedef struct {
+    char* data;
+    size_t length;
+    size_t size;
+} Buffer;
 
 typedef struct {
     char method[16];
@@ -105,13 +113,22 @@ void parseRequest(char *requestString, Request* req) {
     req->url[i] = '\0';
 }
 
-size_t appendString(char* out, size_t index, char* in) {
-    while (*in) {
-        out[index++] = *(in++);
+void checkBufferAllocation(Buffer* buffer, size_t requestedSize) {
+    if (requestedSize > buffer->size) {
+        while (buffer->size < requestedSize) {
+            buffer->size *= 2;
+        }
+        buffer->data = realloc(buffer->data, buffer->size);
+        printf("Reallocated buffer to: %ld\n", buffer->size);
     }
-
-    return index;
 }
+
+void appendString(Buffer* out, char* in) {
+    while (*in) {
+        checkBufferAllocation(out, out->length + 1);
+        out->data[out->length++] = *(in++);
+    }
+} 
 
 void onClose(void) {
     close(sock);
@@ -145,21 +162,20 @@ int main(int argc, int** argv) {
 
     listen(sock, 4);
 
-    char requestBuffer[HEADER_BUFFER_SIZE];
+    Buffer requestBuffer = { .size = 2048 };
+    requestBuffer.data = malloc(requestBuffer.size);
 
-    char* notFound = "HTTP/1.1 404 NOT FOUND\r\n\r\n"
-        "<html><body>\n"
-        "<h1>File not found!</h1>\n"
-        "</body></html>\n";
+    Buffer responseBuffer = { .size = 512 };
+    responseBuffer.data = malloc(responseBuffer.size);
 
-    char headerBuffer[HEADER_BUFFER_SIZE];
-    size_t currentResponseBufferSize = 2 * HEADER_BUFFER_SIZE;
-    char* responseBuffer = malloc(currentResponseBufferSize);
     struct stat fileInfo;
     Request req;
     int returnVal = 0;
 
     while(1) {
+        requestBuffer.length = 0;
+        responseBuffer.length = 0;
+
         printf("Waiting for connection.\n");
         int connection = accept(sock, 0, 0);
 
@@ -169,23 +185,24 @@ int main(int argc, int** argv) {
         }
 
         printf("Got connection.\n");
-        int received = recv(connection, requestBuffer, 2047, 0);
+        int received = recv(connection, requestBuffer.data, requestBuffer.size - 1, 0);
         if (received == -1) {
             perror("Failed to receive data.");
             close(connection);
             continue;
         }
         
-        requestBuffer[received] = '\0';
-        printf("Received request: %s\n", requestBuffer);
-        parseRequest(requestBuffer, &req);
+        requestBuffer.length = received;
+        requestBuffer.data[received] = '\0';
+        printf("Received request: %s\n", requestBuffer.data);
+        parseRequest(requestBuffer.data, &req);
         int fd = open(req.url, O_RDONLY);
 
         char* mimeType = contentTypeHeader(req.url);
         printf("%s\n", mimeType);
 
         if (fd == -1) {
-            write(connection, notFound, strlen(notFound));  
+            write(connection, NOT_FOUND, strlen(NOT_FOUND));  
             close(connection);
             continue; 
         }
@@ -193,40 +210,32 @@ int main(int argc, int** argv) {
         returnVal = fstat(fd, &fileInfo);
 
         if (returnVal == -1) {
-            write(connection, notFound, strlen(notFound));  
+            write(connection, NOT_FOUND, strlen(NOT_FOUND));  
             close(connection);
             close(fd);
             continue;
         }
 
-        if (fileInfo.st_size + HEADER_BUFFER_SIZE > currentResponseBufferSize) {
-            while (fileInfo.st_size + HEADER_BUFFER_SIZE > currentResponseBufferSize) {
-                currentResponseBufferSize <<= 1;
-            }
+        appendString(&responseBuffer, HTTP_OK_HEADER);
+        appendString(&responseBuffer, contentTypeHeader(req.url));
+        appendString(&responseBuffer, HTTP_NEWLINE);
 
-            responseBuffer = realloc(responseBuffer, currentResponseBufferSize);
-        }
-
-        int index = appendString(responseBuffer, 0, HTTP_OK_HEADER);
-        index = appendString(responseBuffer, index, contentTypeHeader(req.url));
-        index = appendString(responseBuffer, index, HTTP_NEWLINE);
-
-        returnVal = read(fd, responseBuffer + index, fileInfo.st_size);
+        checkBufferAllocation(&responseBuffer, responseBuffer.length + fileInfo.st_size);
+        returnVal = read(fd, responseBuffer.data + responseBuffer.length, fileInfo.st_size);
 
         if (returnVal == -1) {
-            write(connection, notFound, strlen(notFound));  
+            write(connection, NOT_FOUND, strlen(NOT_FOUND));  
             close(connection);
             close(fd);
             continue;
         }
 
-        write(connection, responseBuffer, index + fileInfo.st_size);  
-        // char* mimeType = contentTypeHeader(req.url);
-        // printf("%s\n", mimeType);
+        responseBuffer.length += fileInfo.st_size;
 
-        // int sent = sendfile(connection, fd, NULL, fileInfo.st_size);
-        responseBuffer[index + fileInfo.st_size] = '\0';
-        printf("Sent response: %s\n", responseBuffer);
+        write(connection, responseBuffer.data, responseBuffer.length);  
+
+        responseBuffer.data[responseBuffer.length++] = '\0';
+        printf("Sent response: %s\n", responseBuffer.data);
         close(connection);
     }
 
