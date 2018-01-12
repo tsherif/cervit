@@ -41,7 +41,6 @@
 #define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
 
 // TODO(Tarek): Check for leaving root dir
-// TODO(Tarek): index.html default
 // TODO(Tarek): Threads
 // TODO(Tarek): Use Buffer struct for all strings
 
@@ -137,6 +136,11 @@ void parseRequest(char *requestString, Request* req) {
         c = requestString[++index];
     }
     req->url[i] = '\0';
+
+    if (i == 2) {
+        // url == "./"
+        strcpy(req->url, "./index.html");
+    }
 }
 
 void checkBufferAllocation(Buffer* buffer, size_t requestedSize) {
