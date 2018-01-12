@@ -41,8 +41,11 @@
 #define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
 
 // TODO(Tarek): Check for leaving root dir
+// TODO(Tarek): Request of arbitray size
 // TODO(Tarek): Threads
 // TODO(Tarek): Use Buffer struct for all strings
+// TODO(Tarek): Parse URL params/hash
+// TODO(Tarek): Parse headers.
 
 int sock;
 
@@ -53,12 +56,16 @@ typedef struct {
 } Buffer;
 
 typedef struct {
-    char method[16];
-    char url[2048];
+    Buffer method;
+    Buffer url;
 } Request;
 
+Request req = {
+    .method = { .size = 16 },
+    .url = { .size = 1024 }
+};
 Buffer requestBuffer = { .size = 2048 };
-Buffer responseBuffer = { .size = 64 };
+Buffer responseBuffer = { .size = 512 };
 
 int skipSpace(char* in, int index) {
     while (1) {
@@ -113,37 +120,7 @@ char *contentTypeHeader(char* filename) {
     return HTTP_CONTENT_TYPE_KEY "application/octet-stream" HTTP_NEWLINE;
 }
 
-void parseRequest(char *requestString, Request* req) {
-    int index = skipSpace(requestString, 0);
-
-    char c = requestString[index];
-    int i = 0;
-    while (c != ' ' && c != '\t') {
-        req->method[i++] = c;
-
-        c = requestString[++index];
-    }
-    req->method[i] = '\0';
-
-    index = skipSpace(requestString, index);
-
-    c = requestString[index];
-    i = 1;
-    req->url[0] = '.';
-    while (c != ' ' && c != '\t') {
-        req->url[i++] = c;
-
-        c = requestString[++index];
-    }
-    req->url[i] = '\0';
-
-    if (i == 2) {
-        // url == "./"
-        strcpy(req->url, "./index.html");
-    }
-}
-
-void checkBufferAllocation(Buffer* buffer, size_t requestedSize) {
+void buffer_checkAllocation(Buffer* buffer, size_t requestedSize) {
     if (requestedSize > buffer->size) {
         while (buffer->size < requestedSize) {
             buffer->size <<= 1;
@@ -153,20 +130,61 @@ void checkBufferAllocation(Buffer* buffer, size_t requestedSize) {
     }
 }
 
-void appendString(Buffer* out, char* in) {
-    size_t len = 0;
-    
-    while (in[len++]);
-    checkBufferAllocation(out, out->length + len);
+void buffer_appendFromArray(Buffer* out, char* in, size_t n) {
+    buffer_checkAllocation(out, out->length + n);
+    memcpy(out->data + out->length, in, n);
+    out->length += n;
+}
 
-    while (*in) {
-        out->data[out->length++] = *(in++);
+ssize_t buffer_appendFromFile(Buffer* out, int fd, size_t n) {
+    buffer_checkAllocation(out, out->length + n);
+    ssize_t numRead = read(fd, responseBuffer.data + responseBuffer.length, n);
+    if (numRead >= 0) {
+        out->length += numRead;
     }
+    return numRead;
 } 
+
+void parseRequest(char *requestString, Request* req) {
+    req->method.length = 0;
+    req->url.length = 0;
+    int index = skipSpace(requestString, 0);
+
+    int i = index;
+    char c = requestString[i];
+    int len = 0;
+    while (c != ' ' && c != '\t') {
+        ++len;
+        c = requestString[++i];
+    }
+    buffer_appendFromArray(&req->method, requestString + index, len);
+    buffer_appendFromArray(&req->method, "", 1);
+    index += len;
+
+    index = skipSpace(requestString, index);
+
+    i = index;
+    c = requestString[i];
+    len = 0;
+    while (c != ' ' && c != '\t') {
+        ++len;
+        c = requestString[++i];
+    }
+
+    if (len > 1) {
+        buffer_appendFromArray(&req->url, ".", 1);
+        buffer_appendFromArray(&req->url, requestString + index, len);
+    } else {
+        buffer_appendFromArray(&req->url, "./index.html", strlen("./index.html"));
+    }
+    buffer_appendFromArray(&req->method, "", 1);
+}
 
 void onClose(void) {
     free(requestBuffer.data);
     free(responseBuffer.data);
+    free(req.method.data);
+    free(req.url.data);
     close(sock);
 }
 
@@ -183,8 +201,11 @@ int main(int argc, int** argv) {
     signal(SIGTSTP, onSignal);
     signal(SIGTERM, onSignal);
 
+    req.method.data = malloc(req.method.size);
+    req.url.data = malloc(req.url.size);
     requestBuffer.data = malloc(requestBuffer.size);
     responseBuffer.data = malloc(responseBuffer.size);
+
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
@@ -206,7 +227,6 @@ int main(int argc, int** argv) {
     listen(sock, 4);
 
     struct stat fileInfo;
-    Request req;
     int returnVal = 0;
 
     while(1) {
@@ -233,9 +253,9 @@ int main(int argc, int** argv) {
         requestBuffer.data[received] = '\0';
         printf("Received request: %s\n", requestBuffer.data);
         parseRequest(requestBuffer.data, &req);
-        int fd = open(req.url, O_RDONLY);
+        int fd = open(req.url.data, O_RDONLY);
 
-        char* mimeType = contentTypeHeader(req.url);
+        char* mimeType = contentTypeHeader(req.url.data);
         printf("%s\n", mimeType);
 
         if (fd == -1) {
@@ -253,12 +273,12 @@ int main(int argc, int** argv) {
             continue;
         }
 
-        appendString(&responseBuffer, HTTP_OK_HEADER);
-        appendString(&responseBuffer, contentTypeHeader(req.url));
-        appendString(&responseBuffer, HTTP_NEWLINE);
+        buffer_appendFromArray(&responseBuffer, HTTP_OK_HEADER, strlen(HTTP_OK_HEADER));
+        buffer_appendFromArray(&responseBuffer, contentTypeHeader(req.url.data), strlen(contentTypeHeader(req.url.data)));
+        buffer_appendFromArray(&responseBuffer, HTTP_NEWLINE, strlen(HTTP_NEWLINE));
 
-        checkBufferAllocation(&responseBuffer, responseBuffer.length + fileInfo.st_size);
-        returnVal = read(fd, responseBuffer.data + responseBuffer.length, fileInfo.st_size);
+        buffer_checkAllocation(&responseBuffer, responseBuffer.length + fileInfo.st_size);
+        returnVal = buffer_appendFromFile(&responseBuffer, fd, fileInfo.st_size);
 
         if (returnVal == -1) {
             write(connection, NOT_FOUND, strlen(NOT_FOUND));  
@@ -267,7 +287,6 @@ int main(int argc, int** argv) {
             continue;
         }
 
-        responseBuffer.length += fileInfo.st_size;
 
         write(connection, responseBuffer.data, responseBuffer.length);  
 
