@@ -177,6 +177,7 @@ int main(int argc, int** argv) {
     signal(SIGQUIT, onSignal);
     signal(SIGABRT, onSignal);
     signal(SIGTSTP, onSignal);
+    signal(SIGTERM, onSignal);
 
     requestBuffer.data = malloc(requestBuffer.size);
     responseBuffer.data = malloc(responseBuffer.size);
