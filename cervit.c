@@ -40,9 +40,10 @@
 
 #define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
 
-// TODO(Tarek): Check for leaving root dir.
+// TODO(Tarek): Check for leaving root dir
 // TODO(Tarek): index.html default
 // TODO(Tarek): Threads
+// TODO(Tarek): Use Buffer struct for all strings
 
 int sock;
 
@@ -56,6 +57,9 @@ typedef struct {
     char method[16];
     char url[2048];
 } Request;
+
+Buffer requestBuffer = { .size = 2048 };
+Buffer responseBuffer = { .size = 64 };
 
 int skipSpace(char* in, int index) {
     while (1) {
@@ -138,32 +142,44 @@ void parseRequest(char *requestString, Request* req) {
 void checkBufferAllocation(Buffer* buffer, size_t requestedSize) {
     if (requestedSize > buffer->size) {
         while (buffer->size < requestedSize) {
-            buffer->size *= 2;
+            buffer->size <<= 1;
         }
         buffer->data = realloc(buffer->data, buffer->size);
-        printf("Reallocated buffer to: %ld\n", buffer->size);
+        printf("----Reallocated buffer to: %ld----\n", buffer->size);
     }
 }
 
 void appendString(Buffer* out, char* in) {
+    size_t len = 0;
+    
+    while (in[len++]);
+    checkBufferAllocation(out, out->length + len);
+
     while (*in) {
-        checkBufferAllocation(out, out->length + 1);
         out->data[out->length++] = *(in++);
     }
 } 
 
 void onClose(void) {
+    free(requestBuffer.data);
+    free(responseBuffer.data);
     close(sock);
 }
 
-void onInt(int sig) {
+void onSignal(int sig) {
     exit(0);
 }
 
 int main(int argc, int** argv) {
 
     atexit(onClose);
-    signal(SIGINT, onInt);
+    signal(SIGINT, onSignal);
+    signal(SIGQUIT, onSignal);
+    signal(SIGABRT, onSignal);
+    signal(SIGTSTP, onSignal);
+
+    requestBuffer.data = malloc(requestBuffer.size);
+    responseBuffer.data = malloc(responseBuffer.size);
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
@@ -183,12 +199,6 @@ int main(int argc, int** argv) {
     }
 
     listen(sock, 4);
-
-    Buffer requestBuffer = { .size = 2048 };
-    requestBuffer.data = malloc(requestBuffer.size);
-
-    Buffer responseBuffer = { .size = 512 };
-    responseBuffer.data = malloc(responseBuffer.size);
 
     struct stat fileInfo;
     Request req;
