@@ -43,11 +43,10 @@ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 
 #define REQUEST_CHUNK_SIZE 32768
 
-// TODO(Tarek): Check for leaving root dir
 // TODO(Tarek): Threads
-// TODO(Tarek): Use Buffer struct for all strings
+// TODO(Tarek): Check for leaving root dir
 // TODO(Tarek): Parse URL params/hash
-// TODO(Tarek): Parse headers.
+// TODO(Tarek): Parse headers
 
 int sock;
 int connection;
@@ -122,16 +121,7 @@ ssize_t array_find(char* array1, size_t length1, char* array2, size_t length2) {
 
     size_t length = length1 - length2 + 1;
     for (size_t i = 0; i < length; ++i) {
-        size_t matchCount = 0;
-        for (size_t j = 0; j < length2; ++j) {
-            if (array1[i + j] == array2[j]) {
-                ++matchCount;
-            } else {
-                break;
-            }
-        }
-
-        if (matchCount == length2) {
+        if (array_equals(array1 + i, length2, array2, length2)) {
             return i;
         }
     }
@@ -158,7 +148,6 @@ void buffer_checkAllocation(Buffer* buffer, size_t requestedSize) {
             buffer->size <<= 1;
         }
         buffer->data = realloc(buffer->data, buffer->size);
-        printf("----Reallocated buffer to: %ld----\n", buffer->size);
     }
 }
 
@@ -319,6 +308,7 @@ int main(int argc, int** argv) {
                 break;
             }
 
+            // In case it's split between chunks.
             int index = responseBuffer.length > 3 ? responseBuffer.length - 3 : 0;
             buffer_appendFromArray(&requestBuffer, requestChunk, received);
             if (array_find(requestBuffer.data + index, requestBuffer.length - index, "\r\n\r\n", 4) != -1) {
