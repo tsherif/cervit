@@ -82,12 +82,19 @@ size_t string_skipSpace(char* in, size_t index) {
     return index;
 }
 
-size_t string_length(const char* string, char terminator) {
+size_t string_length(const char* string, char* terminators, size_t count) {
     size_t length = 0;
-    while (string[length] != terminator) {
+    while (1) {
+        char c = string[length];
+        for (int i = 0; i < count; ++i) {
+            if (c == terminators[i]){
+                goto done;
+            }
+        }
         ++length;
     }
 
+    done:
     return length;
 }
 
@@ -121,7 +128,7 @@ void buffer_appendFromArray(Buffer* buffer, const char* array, size_t length) {
 }
 
 void buffer_appendFromString(Buffer* buffer, const char* string) {
-    buffer_appendFromArray(buffer, string, string_length(string, '\0'));
+    buffer_appendFromArray(buffer, string, string_length(string, "\0", 1));
 }
 
 ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t length) {
@@ -193,33 +200,22 @@ char *contentTypeHeader(Buffer* filename) {
 void parseRequest(char *requestString, Request* req) {
     req->method.length = 0;
     req->url.length = 0;
-    int index = string_skipSpace(requestString, 0);
 
-    int i = index;
-    char c = requestString[i];
-    int length = 0;
-    while (c != ' ' && c != '\t') {
-        ++length;
-        c = requestString[++i];
-    }
+    // Get method
+    int index = string_skipSpace(requestString, 0);
+    int length = string_length(requestString + index, " \t", 2);
     buffer_appendFromArray(&req->method, requestString + index, length);
     index += length;
 
+    // Get URL
     index = string_skipSpace(requestString, index);
-
-    i = index;
-    c = requestString[i];
-    length = 0;
-    while (c != ' ' && c != '\t') {
-        ++length;
-        c = requestString[++i];
-    }
+    length = string_length(requestString + index, " \t", 2);
 
     if (length > 1) {
         buffer_appendFromArray(&req->url, ".", 1);
         buffer_appendFromArray(&req->url, requestString + index, length);
     } else {
-        buffer_appendFromArray(&req->url, "./index.html", string_length("./index.html", '\0'));
+        buffer_appendFromArray(&req->url, "./index.html", string_length("./index.html", "\0", 1));
     }
 }
 
@@ -302,7 +298,7 @@ int main(int argc, int** argv) {
         int fd = open(req.url.data, O_RDONLY);
 
         if (fd == -1) {
-            write(connection, NOT_FOUND, string_length(NOT_FOUND, '\0'));  
+            write(connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
             close(connection);
             continue; 
         }
@@ -310,21 +306,21 @@ int main(int argc, int** argv) {
         returnVal = fstat(fd, &fileInfo);
 
         if (returnVal == -1) {
-            write(connection, NOT_FOUND, string_length(NOT_FOUND, '\0'));  
+            write(connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
             close(connection);
             close(fd);
             continue;
         }
 
-        buffer_appendFromArray(&responseBuffer, HTTP_OK_HEADER, string_length(HTTP_OK_HEADER, '\0'));
+        buffer_appendFromArray(&responseBuffer, HTTP_OK_HEADER, string_length(HTTP_OK_HEADER, "\0", 1));
         buffer_appendFromString(&responseBuffer, contentTypeHeader(&req.url));
-        buffer_appendFromArray(&responseBuffer, HTTP_NEWLINE, string_length(HTTP_NEWLINE, '\0'));
+        buffer_appendFromArray(&responseBuffer, HTTP_NEWLINE, string_length(HTTP_NEWLINE, "\0", 1));
 
         buffer_checkAllocation(&responseBuffer, responseBuffer.length + fileInfo.st_size);
         returnVal = buffer_appendFromFile(&responseBuffer, fd, fileInfo.st_size);
 
         if (returnVal == -1) {
-            write(connection, NOT_FOUND, string_length(NOT_FOUND, '\0'));  
+            write(connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
             close(connection);
             close(fd);
             continue;
