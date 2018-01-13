@@ -218,10 +218,10 @@ void parseRequest(char *requestString, Request* req) {
 }
 
 void onClose(void) {
-    free(requestBuffer.data);
-    free(responseBuffer.data);
-    free(req.method.data);
-    free(req.url.data);
+    buffer_delete(&requestBuffer);
+    buffer_delete(&responseBuffer);
+    buffer_delete(&req.method);
+    buffer_delete(&req.url);
     close(sock);
 }
 
