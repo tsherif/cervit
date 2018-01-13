@@ -280,7 +280,7 @@ int main(int argc, int** argv) {
         return 1;
     }
 
-    listen(sock, 4);
+    listen(sock, SOMAXCONN);
 
     struct stat fileInfo;
     int returnVal = 0;
