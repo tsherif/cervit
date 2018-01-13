@@ -129,7 +129,7 @@ ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t n) {
     return numRead;
 } 
 
-int buffer_equalString(Buffer* buffer, size_t bOffset, size_t bLength, char* string, size_t sOffset, size_t sLength) {
+int buffer_equalsArray(Buffer* buffer, size_t bOffset, size_t bLength, char* string, size_t sOffset, size_t sLength) {
     if (bLength != sLength) {
         return 0;
     }
@@ -159,27 +159,27 @@ char *contentTypeHeader(Buffer* filename) {
 
     size_t len = filename->length - offset;
 
-    if (buffer_equalString(filename, offset, len, ".html", 0, 5)) {
+    if (buffer_equalsArray(filename, offset, len, ".html", 0, 5)) {
         return HTTP_CONTENT_TYPE_KEY "text/html" HTTP_NEWLINE;
     }
 
-    if (buffer_equalString(filename, offset, len, ".js", 0, 3)) {
+    if (buffer_equalsArray(filename, offset, len, ".js", 0, 3)) {
         return HTTP_CONTENT_TYPE_KEY "application/javascript" HTTP_NEWLINE;
     }
 
-    if (buffer_equalString(filename, offset, len, ".css", 0, 4)) {
+    if (buffer_equalsArray(filename, offset, len, ".css", 0, 4)) {
         return HTTP_CONTENT_TYPE_KEY "text/css" HTTP_NEWLINE;
     }
 
-    if (buffer_equalString(filename, offset, len, ".jpeg", 0, 5) || buffer_equalString(filename, offset, len, ".jpg", 0, 4)) {
+    if (buffer_equalsArray(filename, offset, len, ".jpeg", 0, 5) || buffer_equalsArray(filename, offset, len, ".jpg", 0, 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/jpeg" HTTP_NEWLINE;
     }
 
-    if (buffer_equalString(filename, offset, len, ".png", 0, 4)) {
+    if (buffer_equalsArray(filename, offset, len, ".png", 0, 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/png" HTTP_NEWLINE;
     }
 
-    if (buffer_equalString(filename, offset, len, ".gif", 0, 4)) {
+    if (buffer_equalsArray(filename, offset, len, ".gif", 0, 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/gif" HTTP_NEWLINE;
     }
 
