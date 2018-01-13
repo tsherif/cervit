@@ -27,11 +27,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
-#include <string.h>
 #include <fcntl.h>
-#include <sys/sendfile.h>
 #include <stdlib.h>
 #include <signal.h>
+
+// Forward declare so I don't have to include string.h
+void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 
 #define HEADER_BUFFER_SIZE 2048
 #define HTTP_OK_HEADER "HTTP/1.1 200 OK\r\n"
@@ -42,9 +43,7 @@
 
 #define REQUEST_CHUNK_SIZE 512
 
-
 // TODO(Tarek): Request of arbitray size
-// TODO(Tarek): Replace string funcs with offset/length versions.
 // TODO(Tarek): Check for leaving root dir
 // TODO(Tarek): Threads
 // TODO(Tarek): Use Buffer struct for all strings
@@ -52,6 +51,7 @@
 // TODO(Tarek): Parse headers.
 
 int sock;
+int connection;
 
 typedef struct {
     char* data;
@@ -73,6 +73,10 @@ size_t string_skipSpace(char* in, size_t index) {
         char c = in[index];
 
         if (c != ' ' && c != '\t') {
+            break;
+        }
+
+        if (c == '\0') {
             break;
         }
 
@@ -148,10 +152,14 @@ void buffer_appendFromString(Buffer* buffer, const char* string) {
 ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t length) {
     buffer_checkAllocation(buffer, buffer->length + length);
     ssize_t numRead = read(fd, responseBuffer.data + responseBuffer.length, length);
-    if (numRead >= 0) {
+    if (numRead > 0) {
         buffer->length += numRead;
     }
     return numRead;
+} 
+
+void buffer_print(Buffer* buffer) {
+    write(STDOUT_FILENO, buffer->data, buffer->length);
 } 
 
 char *contentTypeHeader(Buffer* filename) {
@@ -222,6 +230,7 @@ void onClose(void) {
     buffer_delete(&req.method);
     buffer_delete(&req.url);
     close(sock);
+    close(connection);
 }
 
 void onSignal(int sig) {
@@ -270,7 +279,7 @@ int main(int argc, int** argv) {
         responseBuffer.length = 0;
 
         printf("Waiting for connection.\n");
-        int connection = accept(sock, 0, 0);
+        connection = accept(sock, 0, 0);
 
         if (connection == -1) {
             perror("Connection failed");
@@ -323,8 +332,12 @@ int main(int argc, int** argv) {
             continue;
         }
 
+        write(connection, responseBuffer.data, responseBuffer.length);
 
-        write(connection, responseBuffer.data, responseBuffer.length);  
+        if (responseBuffer.length < 1024) {
+            buffer_print(&responseBuffer);
+        }
+
         close(connection);
     }
 
