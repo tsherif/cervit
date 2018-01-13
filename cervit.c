@@ -113,7 +113,9 @@ void buffer_appendFromArray(Buffer* buffer, const char* in, size_t n) {
 
 void buffer_appendFromString(Buffer* buffer, const char* string) {
     size_t len = 0;
-    while (string[len++]); // No block
+    while (string[len]) {
+        ++len;
+    }
 
     buffer_appendFromArray(buffer, string, len);
 }
@@ -311,7 +313,7 @@ int main(int argc, int** argv) {
         }
 
         buffer_appendFromArray(&responseBuffer, HTTP_OK_HEADER, strlen(HTTP_OK_HEADER));
-        buffer_appendFromArray(&responseBuffer, contentTypeHeader(&req.url), strlen(contentTypeHeader(&req.url)));
+        buffer_appendFromString(&responseBuffer, contentTypeHeader(&req.url));
         buffer_appendFromArray(&responseBuffer, HTTP_NEWLINE, strlen(HTTP_NEWLINE));
 
         buffer_checkAllocation(&responseBuffer, responseBuffer.length + fileInfo.st_size);
