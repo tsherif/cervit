@@ -41,9 +41,8 @@ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 
 #define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
 
-#define REQUEST_CHUNK_SIZE 512
+#define REQUEST_CHUNK_SIZE 32768
 
-// TODO(Tarek): Request of arbitray size
 // TODO(Tarek): Check for leaving root dir
 // TODO(Tarek): Threads
 // TODO(Tarek): Use Buffer struct for all strings
@@ -102,7 +101,7 @@ size_t string_length(const char* string, char* terminators, size_t count) {
     return length;
 }
 
-int array_equals(char* array1, size_t length1, char* array2, size_t length2) {
+char array_equals(char* array1, size_t length1, char* array2, size_t length2) {
     if (length1 != length2) {
         return 0;
     }
@@ -114,6 +113,30 @@ int array_equals(char* array1, size_t length1, char* array2, size_t length2) {
     }
 
     return 1;
+}
+
+ssize_t array_find(char* array1, size_t length1, char* array2, size_t length2) {
+    if (length1 < length2) {
+        return -1;
+    }
+
+    size_t length = length1 - length2 + 1;
+    for (size_t i = 0; i < length; ++i) {
+        size_t matchCount = 0;
+        for (size_t j = 0; j < length2; ++j) {
+            if (array1[i + j] == array2[j]) {
+                ++matchCount;
+            } else {
+                break;
+            }
+        }
+
+        if (matchCount == length2) {
+            return i;
+        }
+    }
+
+    return -1;
 }
 
 void buffer_init(Buffer* buffer, size_t size) {
@@ -287,19 +310,31 @@ int main(int argc, int** argv) {
         }
 
         printf("Got connection.\n");
-        int received = recv(connection, requestBuffer.data, requestBuffer.size - 1, 0);
+        int received = 0;
+
+        while(1) {
+            received = recv(connection, requestChunk, REQUEST_CHUNK_SIZE, 0);
+
+            if (received < 1) {
+                break;
+            }
+
+            int index = responseBuffer.length > 3 ? responseBuffer.length - 3 : 0;
+            buffer_appendFromArray(&requestBuffer, requestChunk, received);
+            if (array_find(requestBuffer.data + index, requestBuffer.length - index, "\r\n\r\n", 4) != -1) {
+                break;
+            }
+        }
 
         if (received == -1) {
             perror("Failed to receive data.");
             close(connection);
             continue;
         }
-        
-        requestBuffer.length = received;
-        requestBuffer.data[received] = '\0';
 
-
-        printf("Received request: %s\n", requestBuffer.data);
+        printf("Received request:\n");
+        buffer_print(&requestBuffer);
+       
         parseRequest(requestBuffer.data, &req);
         int fd = open(req.url.data, O_RDONLY);
 
@@ -320,7 +355,7 @@ int main(int argc, int** argv) {
 
         buffer_appendFromArray(&responseBuffer, HTTP_OK_HEADER, string_length(HTTP_OK_HEADER, "\0", 1));
         buffer_appendFromString(&responseBuffer, contentTypeHeader(&req.url));
-        buffer_appendFromArray(&responseBuffer, HTTP_NEWLINE, string_length(HTTP_NEWLINE, "\0", 1));
+        buffer_appendFromArray(&responseBuffer, HTTP_NEWLINE, string_length(HTTP_NEWLINE, "\0", 4));
 
         buffer_checkAllocation(&responseBuffer, responseBuffer.length + fileInfo.st_size);
         returnVal = buffer_appendFromFile(&responseBuffer, fd, fileInfo.st_size);
