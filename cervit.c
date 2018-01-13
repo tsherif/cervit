@@ -100,6 +100,23 @@ size_t string_length(const char* string, char* terminators, size_t count) {
     return length;
 }
 
+unsigned short string_toUshort(const char* string) {
+    ssize_t i = string_length(string, "\0", 1) - 1;
+    int multiplier = 1;
+    unsigned short result = 0;
+    while (i >= 0) {
+        char c = string[i];
+        if (c < '0' || c > '9') {
+            return 0;
+        }
+        result += (string[i] - '0') * multiplier;
+        multiplier *= 10;
+        --i;
+    }
+
+    return result;
+}
+
 char array_equals(char* array1, size_t length1, char* array2, size_t length2) {
     if (length1 != length2) {
         return 0;
@@ -249,7 +266,17 @@ void onSignal(int sig) {
     exit(0);
 }
 
-int main(int argc, int** argv) {
+int main(int argc, char** argv) {
+
+    unsigned short port = 5000;
+
+    if (argc > 1) {
+        unsigned short argPort = string_toUshort(argv[1]);
+
+        if (argPort > 0) {
+            port = argPort;
+        }
+    }
 
     atexit(onClose);
     signal(SIGINT, onSignal);
@@ -273,7 +300,7 @@ int main(int argc, int** argv) {
 
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(5000);
+    addr.sin_port = htons(port);
 
     if (bind(sock, (struct sockaddr*) &addr, sizeof(addr))) {
         perror("Can't bind");
@@ -281,6 +308,7 @@ int main(int argc, int** argv) {
     }
 
     listen(sock, SOMAXCONN);
+    printf("Listening on port %d\n", port);
 
     struct stat fileInfo;
     int returnVal = 0;
