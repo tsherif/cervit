@@ -127,39 +127,57 @@ ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t n) {
     return numRead;
 } 
 
-char *contentTypeHeader(Buffer* filename) {
-    size_t len = filename->length;
-    char* ext = filename->data + len - 1;
-    
-    while (ext != filename->data && *ext != '.') {
-        --ext;
+int buffer_equalString(Buffer* buffer, size_t bOffset, size_t bLength, char* string, size_t sOffset, size_t sLength) {
+    if (bLength != sLength) {
+        return 0;
     }
 
-    if (ext == filename->data) {
+    char *d = buffer->data + bOffset;
+    char *s = string + sOffset;
+
+    for (size_t i = 0; i < bLength; ++i) {
+        if (d[i] != s[i]) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+char *contentTypeHeader(Buffer* filename) {
+    size_t offset = filename->length - 1;
+    
+    while (offset > 0 && filename->data[offset] != '.') {
+        --offset;
+    }
+
+    if (offset == 0) {
         return HTTP_CONTENT_TYPE_KEY "application/octet-stream" HTTP_NEWLINE;
     }
 
-    if (strcmp(ext, ".html") == 0) {
+    size_t len = filename->length - offset;
+
+    if (buffer_equalString(filename, offset, len, ".html", 0, 5)) {
         return HTTP_CONTENT_TYPE_KEY "text/html" HTTP_NEWLINE;
     }
 
-    if (strcmp(ext, ".js") == 0) {
+    if (buffer_equalString(filename, offset, len, ".js", 0, 3)) {
         return HTTP_CONTENT_TYPE_KEY "application/javascript" HTTP_NEWLINE;
     }
 
-    if (strcmp(ext, ".css") == 0) {
+    if (buffer_equalString(filename, offset, len, ".css", 0, 4)) {
         return HTTP_CONTENT_TYPE_KEY "text/css" HTTP_NEWLINE;
     }
 
-    if (strcmp(ext, ".jpeg") == 0 || strcmp(ext, ".jpg") == 0) {
+    if (buffer_equalString(filename, offset, len, ".jpeg", 0, 5) || buffer_equalString(filename, offset, len, ".jpg", 0, 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/jpeg" HTTP_NEWLINE;
     }
 
-    if (strcmp(ext, ".png") == 0) {
+    if (buffer_equalString(filename, offset, len, ".png", 0, 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/png" HTTP_NEWLINE;
     }
 
-    if (strcmp(ext, ".gif") == 0) {
+    if (buffer_equalString(filename, offset, len, ".gif", 0, 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/gif" HTTP_NEWLINE;
     }
 
