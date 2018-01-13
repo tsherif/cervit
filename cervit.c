@@ -68,7 +68,7 @@ Request req;
 Buffer requestBuffer;
 Buffer responseBuffer;
 
-int skipSpace(char* in, int index) {
+size_t string_skipSpace(char* in, size_t index) {
     while (1) {
         char c = in[index];
 
@@ -80,6 +80,15 @@ int skipSpace(char* in, int index) {
     }
 
     return index;
+}
+
+size_t string_length(const char* string, char terminator) {
+    size_t length = 0;
+    while (string[length] != terminator) {
+        ++length;
+    }
+
+    return length;
 }
 
 void buffer_init(Buffer* buffer, size_t size) {
@@ -105,24 +114,19 @@ void buffer_checkAllocation(Buffer* buffer, size_t requestedSize) {
     }
 }
 
-void buffer_appendFromArray(Buffer* buffer, const char* in, size_t n) {
-    buffer_checkAllocation(buffer, buffer->length + n);
-    memcpy(buffer->data + buffer->length, in, n);
-    buffer->length += n;
+void buffer_appendFromArray(Buffer* buffer, const char* array, size_t length) {
+    buffer_checkAllocation(buffer, buffer->length + length);
+    memcpy(buffer->data + buffer->length, array, length);
+    buffer->length += length;
 }
 
 void buffer_appendFromString(Buffer* buffer, const char* string) {
-    size_t len = 0;
-    while (string[len]) {
-        ++len;
-    }
-
-    buffer_appendFromArray(buffer, string, len);
+    buffer_appendFromArray(buffer, string, string_length(string, '\0'));
 }
 
-ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t n) {
-    buffer_checkAllocation(buffer, buffer->length + n);
-    ssize_t numRead = read(fd, responseBuffer.data + responseBuffer.length, n);
+ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t length) {
+    buffer_checkAllocation(buffer, buffer->length + length);
+    ssize_t numRead = read(fd, responseBuffer.data + responseBuffer.length, length);
     if (numRead >= 0) {
         buffer->length += numRead;
     }
@@ -157,29 +161,29 @@ char *contentTypeHeader(Buffer* filename) {
         return HTTP_CONTENT_TYPE_KEY "application/octet-stream" HTTP_NEWLINE;
     }
 
-    size_t len = filename->length - offset;
+    size_t length = filename->length - offset;
 
-    if (buffer_equalsArray(filename, offset, len, ".html", 0, 5)) {
+    if (buffer_equalsArray(filename, offset, length, ".html", 0, 5)) {
         return HTTP_CONTENT_TYPE_KEY "text/html" HTTP_NEWLINE;
     }
 
-    if (buffer_equalsArray(filename, offset, len, ".js", 0, 3)) {
+    if (buffer_equalsArray(filename, offset, length, ".js", 0, 3)) {
         return HTTP_CONTENT_TYPE_KEY "application/javascript" HTTP_NEWLINE;
     }
 
-    if (buffer_equalsArray(filename, offset, len, ".css", 0, 4)) {
+    if (buffer_equalsArray(filename, offset, length, ".css", 0, 4)) {
         return HTTP_CONTENT_TYPE_KEY "text/css" HTTP_NEWLINE;
     }
 
-    if (buffer_equalsArray(filename, offset, len, ".jpeg", 0, 5) || buffer_equalsArray(filename, offset, len, ".jpg", 0, 4)) {
+    if (buffer_equalsArray(filename, offset, length, ".jpeg", 0, 5) || buffer_equalsArray(filename, offset, length, ".jpg", 0, 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/jpeg" HTTP_NEWLINE;
     }
 
-    if (buffer_equalsArray(filename, offset, len, ".png", 0, 4)) {
+    if (buffer_equalsArray(filename, offset, length, ".png", 0, 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/png" HTTP_NEWLINE;
     }
 
-    if (buffer_equalsArray(filename, offset, len, ".gif", 0, 4)) {
+    if (buffer_equalsArray(filename, offset, length, ".gif", 0, 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/gif" HTTP_NEWLINE;
     }
 
@@ -189,33 +193,33 @@ char *contentTypeHeader(Buffer* filename) {
 void parseRequest(char *requestString, Request* req) {
     req->method.length = 0;
     req->url.length = 0;
-    int index = skipSpace(requestString, 0);
+    int index = string_skipSpace(requestString, 0);
 
     int i = index;
     char c = requestString[i];
-    int len = 0;
+    int length = 0;
     while (c != ' ' && c != '\t') {
-        ++len;
+        ++length;
         c = requestString[++i];
     }
-    buffer_appendFromArray(&req->method, requestString + index, len);
-    index += len;
+    buffer_appendFromArray(&req->method, requestString + index, length);
+    index += length;
 
-    index = skipSpace(requestString, index);
+    index = string_skipSpace(requestString, index);
 
     i = index;
     c = requestString[i];
-    len = 0;
+    length = 0;
     while (c != ' ' && c != '\t') {
-        ++len;
+        ++length;
         c = requestString[++i];
     }
 
-    if (len > 1) {
+    if (length > 1) {
         buffer_appendFromArray(&req->url, ".", 1);
-        buffer_appendFromArray(&req->url, requestString + index, len);
+        buffer_appendFromArray(&req->url, requestString + index, length);
     } else {
-        buffer_appendFromArray(&req->url, "./index.html", strlen("./index.html"));
+        buffer_appendFromArray(&req->url, "./index.html", string_length("./index.html", '\0'));
     }
 }
 
@@ -298,7 +302,7 @@ int main(int argc, int** argv) {
         int fd = open(req.url.data, O_RDONLY);
 
         if (fd == -1) {
-            write(connection, NOT_FOUND, strlen(NOT_FOUND));  
+            write(connection, NOT_FOUND, string_length(NOT_FOUND, '\0'));  
             close(connection);
             continue; 
         }
@@ -306,21 +310,21 @@ int main(int argc, int** argv) {
         returnVal = fstat(fd, &fileInfo);
 
         if (returnVal == -1) {
-            write(connection, NOT_FOUND, strlen(NOT_FOUND));  
+            write(connection, NOT_FOUND, string_length(NOT_FOUND, '\0'));  
             close(connection);
             close(fd);
             continue;
         }
 
-        buffer_appendFromArray(&responseBuffer, HTTP_OK_HEADER, strlen(HTTP_OK_HEADER));
+        buffer_appendFromArray(&responseBuffer, HTTP_OK_HEADER, string_length(HTTP_OK_HEADER, '\0'));
         buffer_appendFromString(&responseBuffer, contentTypeHeader(&req.url));
-        buffer_appendFromArray(&responseBuffer, HTTP_NEWLINE, strlen(HTTP_NEWLINE));
+        buffer_appendFromArray(&responseBuffer, HTTP_NEWLINE, string_length(HTTP_NEWLINE, '\0'));
 
         buffer_checkAllocation(&responseBuffer, responseBuffer.length + fileInfo.st_size);
         returnVal = buffer_appendFromFile(&responseBuffer, fd, fileInfo.st_size);
 
         if (returnVal == -1) {
-            write(connection, NOT_FOUND, strlen(NOT_FOUND));  
+            write(connection, NOT_FOUND, string_length(NOT_FOUND, '\0'));  
             close(connection);
             close(fd);
             continue;
