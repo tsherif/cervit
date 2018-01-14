@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <pthread.h>
 
 // Forward declare so I don't have to include string.h
 void *memcpy(void * restrict dest, const void * restrict src, size_t n);
@@ -42,6 +43,7 @@ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 #define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
 
 #define REQUEST_CHUNK_SIZE 32768
+#define NUM_THREADS 1
 
 // TODO(Tarek): Threads
 // TODO(Tarek): Check for leaving root dir
@@ -49,7 +51,6 @@ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 // TODO(Tarek): Parse headers
 
 int sock;
-int connection;
 
 typedef struct {
     char* data;
@@ -62,9 +63,19 @@ typedef struct {
     Buffer url;
 } Request;
 
-Request req;
-Buffer requestBuffer;
-Buffer responseBuffer;
+pthread_t threads[NUM_THREADS];
+int connections[NUM_THREADS];
+Request requests[NUM_THREADS];
+Buffer requestBuffers[NUM_THREADS];
+Buffer responseBuffers[NUM_THREADS];
+
+// Shared
+int currentConnection;
+pthread_mutex_t currentConnectionLock;
+pthread_cond_t currentConnectionWritten;
+pthread_cond_t currentConnectionRead;
+char currentConnectionWriteDone;
+char currentConnectionReadDone;
 
 size_t string_skipSpace(char* in, size_t index) {
     while (1) {
@@ -180,7 +191,7 @@ void buffer_appendFromString(Buffer* buffer, const char* string) {
 
 ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t length) {
     buffer_checkAllocation(buffer, buffer->length + length);
-    ssize_t numRead = read(fd, responseBuffer.data + responseBuffer.length, length);
+    ssize_t numRead = read(fd, buffer->data + buffer->length, length);
     if (numRead > 0) {
         buffer->length += numRead;
     }
@@ -253,13 +264,114 @@ void parseRequest(char *requestString, Request* req) {
     }
 }
 
+void *handleRequest(void* args) {
+    int id = *((int *) args);
+
+    struct stat fileInfo;
+    int returnVal = 0;
+    char requestChunk[REQUEST_CHUNK_SIZE];
+    int received = 0;
+
+    while(1) {
+        requestBuffers[id].length = 0;
+        responseBuffers[id].length = 0;
+
+        pthread_mutex_lock(&currentConnectionLock);
+        currentConnectionReadDone = 0;
+        while(!currentConnectionWriteDone) {
+            pthread_cond_wait(&currentConnectionWritten, &currentConnectionLock);
+        }
+        connections[id] = currentConnection;
+        currentConnectionReadDone = 1;
+        pthread_mutex_unlock(&currentConnectionLock);
+        pthread_cond_signal(&currentConnectionRead);
+
+        while(1) {
+
+            received = recv(connections[id], requestChunk, REQUEST_CHUNK_SIZE, 0);
+
+            if (received < 1) {
+                break;
+            }
+
+            // In case it's split between chunks.
+            int index = responseBuffers[id].length > 3 ? responseBuffers[id].length - 3 : 0;
+            buffer_appendFromArray(&requestBuffers[id], requestChunk, received);
+            if (array_find(requestBuffers[id].data + index, requestBuffers[id].length - index, "\r\n\r\n", 4) != -1) {
+                break;
+            }
+        }
+
+        if (received == -1) {
+            perror("Failed to receive data");
+            close(connections[id]);
+            continue;
+        }
+
+        printf("Received request:\n");
+        buffer_print(&requestBuffers[id]);
+        
+        parseRequest(requestBuffers[id].data, &requests[id]);
+
+        fprintf(stderr, "URL ");
+        buffer_print(&requests[id].url);
+        fprintf(stderr, " handled by thread %d\n", id);
+
+        int fd = open(requests[id].url.data, O_RDONLY);
+
+        if (fd == -1) {
+            perror("Failed to open file");
+            write(connections[id], NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            close(connections[id]);
+            continue; 
+        }
+
+        returnVal = fstat(fd, &fileInfo);
+
+        if (returnVal == -1) {
+            perror("Failed to stat file");
+            write(connections[id], NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            close(connections[id]);
+            close(fd);
+            continue;
+        }
+
+        buffer_appendFromArray(&responseBuffers[id], HTTP_OK_HEADER, string_length(HTTP_OK_HEADER, "\0", 1));
+        buffer_appendFromString(&responseBuffers[id], contentTypeHeader(&requests[id].url));
+        buffer_appendFromArray(&responseBuffers[id], HTTP_NEWLINE, string_length(HTTP_NEWLINE, "\0", 4));
+
+        buffer_checkAllocation(&responseBuffers[id], responseBuffers[id].length + fileInfo.st_size);
+        returnVal = buffer_appendFromFile(&responseBuffers[id], fd, fileInfo.st_size);
+
+        if (returnVal == -1) {
+            perror("Failed to read file");
+            write(connections[id], NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            close(connections[id]);
+            close(fd);
+            continue;
+        }
+
+        write(connections[id], responseBuffers[id].data, responseBuffers[id].length);
+
+        if (responseBuffers[id].length < 1024) {
+            buffer_print(&responseBuffers[id]);
+        }
+
+        close(connections[id]);
+    }
+
+    
+}
+
 void onClose(void) {
-    buffer_delete(&requestBuffer);
-    buffer_delete(&responseBuffer);
-    buffer_delete(&req.method);
-    buffer_delete(&req.url);
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        buffer_delete(&requestBuffers[i]);
+        buffer_delete(&responseBuffers[i]);
+        buffer_delete(&requests[i].method);
+        buffer_delete(&requests[i].url);
+        close(connections[i]);
+    }
     close(sock);
-    close(connection);
 }
 
 void onSignal(int sig) {
@@ -285,10 +397,21 @@ int main(int argc, char** argv) {
     signal(SIGTSTP, onSignal);
     signal(SIGTERM, onSignal);
 
-    buffer_init(&req.method, 16);
-    buffer_init(&req.url, 1024);
-    buffer_init(&requestBuffer, 2048);
-    buffer_init(&responseBuffer, 512);
+    // TODO(Tarek): INIT THREADS!!!!
+
+    int ids[NUM_THREADS];
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        ids[i] = i;
+        pthread_create(&threads[i], NULL, handleRequest, &ids[i]);
+        buffer_init(&requests[i].method, 16);
+        buffer_init(&requests[i].url, 1024);
+        buffer_init(&requestBuffers[i], 2048);
+        buffer_init(&responseBuffers[i], 512);
+    }
+
+    pthread_mutex_init(&currentConnectionLock, NULL);
+    pthread_cond_init(&currentConnectionWritten, NULL);
+    pthread_cond_init(&currentConnectionRead, NULL);
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
@@ -310,13 +433,9 @@ int main(int argc, char** argv) {
     listen(sock, SOMAXCONN);
     printf("Listening on port %d\n", port);
 
-    struct stat fileInfo;
-    int returnVal = 0;
-    char requestChunk[REQUEST_CHUNK_SIZE];
+    int connection;
 
     while(1) {
-        requestBuffer.length = 0;
-        responseBuffer.length = 0;
 
         printf("Waiting for connection.\n");
         connection = accept(sock, 0, 0);
@@ -327,71 +446,19 @@ int main(int argc, char** argv) {
         }
 
         printf("Got connection.\n");
-        int received = 0;
 
-        while(1) {
-            received = recv(connection, requestChunk, REQUEST_CHUNK_SIZE, 0);
+        pthread_mutex_lock(&currentConnectionLock);
+        currentConnection = connection;
+        currentConnectionWriteDone = 1;
+        pthread_mutex_unlock(&currentConnectionLock);
+        pthread_cond_signal(&currentConnectionWritten);
 
-            if (received < 1) {
-                break;
-            }
-
-            // In case it's split between chunks.
-            int index = responseBuffer.length > 3 ? responseBuffer.length - 3 : 0;
-            buffer_appendFromArray(&requestBuffer, requestChunk, received);
-            if (array_find(requestBuffer.data + index, requestBuffer.length - index, "\r\n\r\n", 4) != -1) {
-                break;
-            }
+        pthread_mutex_lock(&currentConnectionLock);
+        while(!currentConnectionReadDone) {
+            pthread_cond_wait(&currentConnectionRead, &currentConnectionLock);
         }
-
-        if (received == -1) {
-            perror("Failed to receive data.");
-            close(connection);
-            continue;
-        }
-
-        printf("Received request:\n");
-        buffer_print(&requestBuffer);
-       
-        parseRequest(requestBuffer.data, &req);
-        int fd = open(req.url.data, O_RDONLY);
-
-        if (fd == -1) {
-            write(connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
-            close(connection);
-            continue; 
-        }
-
-        returnVal = fstat(fd, &fileInfo);
-
-        if (returnVal == -1) {
-            write(connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
-            close(connection);
-            close(fd);
-            continue;
-        }
-
-        buffer_appendFromArray(&responseBuffer, HTTP_OK_HEADER, string_length(HTTP_OK_HEADER, "\0", 1));
-        buffer_appendFromString(&responseBuffer, contentTypeHeader(&req.url));
-        buffer_appendFromArray(&responseBuffer, HTTP_NEWLINE, string_length(HTTP_NEWLINE, "\0", 4));
-
-        buffer_checkAllocation(&responseBuffer, responseBuffer.length + fileInfo.st_size);
-        returnVal = buffer_appendFromFile(&responseBuffer, fd, fileInfo.st_size);
-
-        if (returnVal == -1) {
-            write(connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
-            close(connection);
-            close(fd);
-            continue;
-        }
-
-        write(connection, responseBuffer.data, responseBuffer.length);
-
-        if (responseBuffer.length < 1024) {
-            buffer_print(&responseBuffer);
-        }
-
-        close(connection);
+        currentConnectionWriteDone = 0;
+        pthread_mutex_unlock(&currentConnectionLock);
     }
 
     return 0;
