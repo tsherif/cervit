@@ -44,7 +44,6 @@ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 
 #define REQUEST_CHUNK_SIZE 32768
 
-// TODO(Tarek): Scheduling bug
 // TODO(Tarek): Check for leaving root dir
 // TODO(Tarek): Parse URL params/hash
 // TODO(Tarek): Parse headers
@@ -297,11 +296,11 @@ void *handleRequest(void* args) {
 
 
         pthread_mutex_lock(&currentConnectionLock);
-        currentConnectionReadDone = 0;
         fprintf(stderr, "Thread %d waiting for request\n", id);
         while(!currentConnectionWriteDone) {
             pthread_cond_wait(&currentConnectionWritten, &currentConnectionLock);
         }
+        currentConnectionWriteDone = 0;
         connections[id] = currentConnection;
         currentConnectionReadDone = 1;
         fprintf(stderr, "Thread %d got request request %d\n", id, currentConnection);
@@ -519,7 +518,7 @@ int main(int argc, char** argv) {
         while(!currentConnectionReadDone) {
             pthread_cond_wait(&currentConnectionRead, &currentConnectionLock);
         }
-        currentConnectionWriteDone = 0;
+        currentConnectionReadDone = 0;
         pthread_mutex_unlock(&currentConnectionLock);
     }
 
