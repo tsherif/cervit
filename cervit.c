@@ -452,6 +452,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    int sockoptTrue = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &sockoptTrue, sizeof(sockoptTrue));
+
     struct sockaddr_in addr;
 
     addr.sin_family = AF_INET;
