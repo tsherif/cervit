@@ -28,14 +28,17 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <stdlib.h>
 #include <signal.h>
 #include <pthread.h>
 
-// Forward declare so I don't have to include string.h
+// Forward declare so I don't have to include stdlib.h, string.h
+void *malloc(size_t size);
+void *realloc(void *ptr, size_t size);
+void free(void *ptr);
 void *memcpy(void * restrict dest, const void * restrict src, size_t n);
+int atexit(void (*func)(void));
+void exit(int status);
 
-#define HEADER_BUFFER_SIZE 2048
 #define HTTP_OK_HEADER "HTTP/1.1 200 OK\r\n"
 #define HTTP_CONTENT_TYPE_KEY "Content-Type: "
 #define HTTP_NEWLINE "\r\n"
@@ -48,8 +51,6 @@ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 // TODO(Tarek): Parse URL params/hash
 // TODO(Tarek): Parse headers
 
-int sock;
-
 typedef struct {
     char* data;
     size_t length;
@@ -61,6 +62,10 @@ typedef struct {
     Buffer url;
 } Request;
 
+// The listening socket
+int sock;
+
+// Unshared thread variables
 long numThreads;
 pthread_t *threads;
 int *threadIds;
@@ -69,7 +74,7 @@ Request *requests;
 Buffer *requestBuffers;
 Buffer *responseBuffers;
 
-// Shared
+// Shared thread variables
 int currentConnection;
 pthread_mutex_t currentConnectionLock;
 pthread_cond_t currentConnectionWritten;
@@ -264,6 +269,7 @@ char *contentTypeHeader(Buffer* filename) {
     return HTTP_CONTENT_TYPE_KEY "application/octet-stream" HTTP_NEWLINE;
 }
 
+// Currently just gets method and URL
 void parseRequest(char *requestString, Request* req) {
     req->method.length = 0;
     req->url.length = 0;
@@ -282,6 +288,7 @@ void parseRequest(char *requestString, Request* req) {
     buffer_appendFromArray(&req->url, requestString + index, length);
 }
 
+// Thread main function
 void *handleRequest(void* args) {
     int id = *((int *) args);
 
@@ -294,6 +301,7 @@ void *handleRequest(void* args) {
         requestBuffers[id].length = 0;
         responseBuffers[id].length = 0;
 
+        // Communication with main thread.
         pthread_mutex_lock(&currentConnectionLock);
         while(!currentConnectionWriteDone) {
             pthread_cond_wait(&currentConnectionWritten, &currentConnectionLock);
@@ -327,9 +335,9 @@ void *handleRequest(void* args) {
         
         parseRequest(requestBuffers[id].data, &requests[id]);
 
-        fprintf(stderr, "URL ");
+        printf("URL ");
         buffer_print(&requests[id].url);
-        fprintf(stderr, " handled by thread %d\n", id);
+        printf(" handled by thread %d\n", id);
 
         returnVal = buffer_statFile(&requests[id].url, &fileInfo);
 
@@ -386,6 +394,7 @@ void *handleRequest(void* args) {
         write(connections[id], responseBuffers[id].data, responseBuffers[id].length);
 
         close(connections[id]);
+        close(fd);
     }
 
     
@@ -430,7 +439,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    fprintf(stderr, "Starting cervit on port %d using %ld threads\n", port, numThreads);
+    printf("Starting cervit on port %d using %ld threads\n", port, numThreads);
 
     atexit(onClose);
     signal(SIGINT, onSignal);
@@ -484,8 +493,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    fprintf(stderr, "Socket listening\n");
+    printf("Socket listening\n");
 
+    // Accepting socket
     int connection;
 
     while(1) {
@@ -496,6 +506,8 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        // Communication with worker threads.
+        // Pass accepted socket to worker.
         pthread_mutex_lock(&currentConnectionLock);
         currentConnection = connection;
         currentConnectionWriteDone = 1;
