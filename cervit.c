@@ -294,7 +294,6 @@ void *handleRequest(void* args) {
         requestBuffers[id].length = 0;
         responseBuffers[id].length = 0;
 
-
         pthread_mutex_lock(&currentConnectionLock);
         while(!currentConnectionWriteDone) {
             pthread_cond_wait(&currentConnectionWritten, &currentConnectionLock);
@@ -306,7 +305,6 @@ void *handleRequest(void* args) {
         pthread_cond_signal(&currentConnectionRead);
 
         while(1) {
-
             received = recv(connections[id], requestChunk, REQUEST_CHUNK_SIZE, 0);
 
             if (received < 1) {
