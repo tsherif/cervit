@@ -43,8 +43,8 @@ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 #define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
 
 #define REQUEST_CHUNK_SIZE 32768
-#define NUM_THREADS 4
 
+// TODO(Tarek): Scheduling bug
 // TODO(Tarek): Check for leaving root dir
 // TODO(Tarek): Parse URL params/hash
 // TODO(Tarek): Parse headers
@@ -62,11 +62,13 @@ typedef struct {
     Buffer url;
 } Request;
 
-pthread_t threads[NUM_THREADS];
-int connections[NUM_THREADS];
-Request requests[NUM_THREADS];
-Buffer requestBuffers[NUM_THREADS];
-Buffer responseBuffers[NUM_THREADS];
+long numThreads;
+pthread_t *threads;
+int *threadIds;
+int *connections;
+Request *requests;
+Buffer *requestBuffers;
+Buffer *responseBuffers;
 
 // Shared
 int currentConnection;
@@ -98,7 +100,7 @@ size_t string_length(const char* string, char* terminators, size_t count) {
     size_t length = 0;
     while (1) {
         char c = string[length];
-        for (int i = 0; i < count; ++i) {
+        for (size_t i = 0; i < count; ++i) {
             if (c == terminators[i]){
                 goto done;
             }
@@ -201,7 +203,7 @@ int buffer_openFile(Buffer* buffer, int flags) {
 
 int buffer_statFile(Buffer* buffer, struct stat *fileInfo) {
     // If buffer isn't currently null-terminated, add null
-    // in first unused byte for the read.
+    // in first unused byte for the stat.
     if (buffer->data[buffer->length - 1] != '\0') {
         buffer_checkAllocation(buffer, buffer->length + 1);
         buffer->data[buffer->length] = '\0';
@@ -293,13 +295,16 @@ void *handleRequest(void* args) {
         requestBuffers[id].length = 0;
         responseBuffers[id].length = 0;
 
+
         pthread_mutex_lock(&currentConnectionLock);
         currentConnectionReadDone = 0;
+        fprintf(stderr, "Thread %d waiting for request\n", id);
         while(!currentConnectionWriteDone) {
             pthread_cond_wait(&currentConnectionWritten, &currentConnectionLock);
         }
         connections[id] = currentConnection;
         currentConnectionReadDone = 1;
+        fprintf(stderr, "Thread %d got request request %d\n", id, currentConnection);
         pthread_mutex_unlock(&currentConnectionLock);
         pthread_cond_signal(&currentConnectionRead);
 
@@ -324,9 +329,6 @@ void *handleRequest(void* args) {
             close(connections[id]);
             continue;
         }
-
-        printf("Received request:\n");
-        buffer_print(&requestBuffers[id]);
         
         parseRequest(requestBuffers[id].data, &requests[id]);
 
@@ -388,10 +390,6 @@ void *handleRequest(void* args) {
 
         write(connections[id], responseBuffers[id].data, responseBuffers[id].length);
 
-        if (responseBuffers[id].length < 1024) {
-            buffer_print(&responseBuffers[id]);
-        }
-
         close(connections[id]);
     }
 
@@ -399,7 +397,7 @@ void *handleRequest(void* args) {
 }
 
 void onClose(void) {
-    for (int i = 0; i < NUM_THREADS; ++i) {
+    for (int i = 0; i < numThreads; ++i) {
         buffer_delete(&requestBuffers[i]);
         buffer_delete(&responseBuffers[i]);
         buffer_delete(&requests[i].method);
@@ -407,6 +405,12 @@ void onClose(void) {
         close(connections[i]);
     }
     close(sock);
+    free(threads);
+    free(threadIds);
+    free(connections);
+    free(requests);
+    free(requestBuffers);
+    free(responseBuffers);
 }
 
 void onSignal(int sig) {
@@ -417,6 +421,12 @@ int main(int argc, char** argv) {
 
     unsigned short port = 5000;
 
+    numThreads = sysconf(_SC_NPROCESSORS_CONF);
+
+    if (numThreads < 1) {
+        numThreads = 1;
+    }
+
     if (argc > 1) {
         unsigned short argPort = string_toUshort(argv[1]);
 
@@ -425,6 +435,8 @@ int main(int argc, char** argv) {
         }
     }
 
+    fprintf(stderr, "Starting cervit on port %d using %ld threads.\n", port, numThreads);
+
     atexit(onClose);
     signal(SIGINT, onSignal);
     signal(SIGQUIT, onSignal);
@@ -432,10 +444,18 @@ int main(int argc, char** argv) {
     signal(SIGTSTP, onSignal);
     signal(SIGTERM, onSignal);
 
-    int ids[NUM_THREADS];
-    for (int i = 0; i < NUM_THREADS; ++i) {
-        ids[i] = i;
-        pthread_create(&threads[i], NULL, handleRequest, &ids[i]);
+
+
+    threads = malloc(numThreads * sizeof(pthread_t));
+    threadIds = malloc(numThreads * sizeof(int));
+    connections = malloc(numThreads * sizeof(int));
+    requests = malloc(numThreads * sizeof(Request));
+    requestBuffers = malloc(numThreads * sizeof(Buffer));
+    responseBuffers = malloc(numThreads * sizeof(Buffer));
+    
+    for (int i = 0; i < numThreads; ++i) {
+        threadIds[i] = i;
+        pthread_create(&threads[i], NULL, handleRequest, &threadIds[i]);
         buffer_init(&requests[i].method, 16);
         buffer_init(&requests[i].url, 1024);
         buffer_init(&requestBuffers[i], 2048);
@@ -447,8 +467,8 @@ int main(int argc, char** argv) {
     pthread_cond_init(&currentConnectionRead, NULL);
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        perror("Can't create socket");
+    if (sock == -1) {
+        perror("Failed to create socket");
         return 1;
     }
 
@@ -461,19 +481,23 @@ int main(int argc, char** argv) {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port);
 
-    if (bind(sock, (struct sockaddr*) &addr, sizeof(addr))) {
-        perror("Can't bind");
+    if (bind(sock, (struct sockaddr*) &addr, sizeof(addr)) == -1) {
+        perror("Failed to bind");
         return 1;
     }
 
-    listen(sock, SOMAXCONN);
-    printf("Listening on port %d\n", port);
+    if (listen(sock, SOMAXCONN) == -1) {
+        perror("Failed to bind");
+        return 1;
+    }
+
+    fprintf(stderr, "Socket listening.\n");
 
     int connection;
 
     while(1) {
 
-        printf("Waiting for connection.\n");
+        fprintf(stderr, "Waiting for connection.\n");
         connection = accept(sock, 0, 0);
 
         if (connection == -1) {
@@ -481,15 +505,17 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        printf("Got connection.\n");
+        fprintf(stderr, "Got connection %d.\n", connection);
 
         pthread_mutex_lock(&currentConnectionLock);
+        fprintf(stderr, "Main thread writing connection.\n");
         currentConnection = connection;
         currentConnectionWriteDone = 1;
         pthread_mutex_unlock(&currentConnectionLock);
         pthread_cond_signal(&currentConnectionWritten);
 
         pthread_mutex_lock(&currentConnectionLock);
+        fprintf(stderr, "Main thread waiting for connection read.\n");
         while(!currentConnectionReadDone) {
             pthread_cond_wait(&currentConnectionRead, &currentConnectionLock);
         }
