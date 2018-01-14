@@ -45,7 +45,6 @@ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 #define REQUEST_CHUNK_SIZE 32768
 #define NUM_THREADS 4
 
-// TODO(Tarek): Threads
 // TODO(Tarek): Check for leaving root dir
 // TODO(Tarek): Parse URL params/hash
 // TODO(Tarek): Parse headers
@@ -190,7 +189,7 @@ void buffer_appendFromString(Buffer* buffer, const char* string) {
 }
 
 int buffer_openFile(Buffer* buffer, int flags) {
-    // If buffer isn't current null-terminated, add null
+    // If buffer isn't currently null-terminated, add null
     // in first unused byte for the read.
     if (buffer->data[buffer->length - 1] != '\0') {
         buffer_checkAllocation(buffer, buffer->length + 1);
@@ -198,6 +197,17 @@ int buffer_openFile(Buffer* buffer, int flags) {
     }
 
     return open(buffer->data, flags);
+}
+
+int buffer_statFile(Buffer* buffer, struct stat *fileInfo) {
+    // If buffer isn't currently null-terminated, add null
+    // in first unused byte for the read.
+    if (buffer->data[buffer->length - 1] != '\0') {
+        buffer_checkAllocation(buffer, buffer->length + 1);
+        buffer->data[buffer->length] = '\0';
+    }
+
+    return stat(buffer->data, fileInfo);
 }
 
 ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t length) {
@@ -267,12 +277,8 @@ void parseRequest(char *requestString, Request* req) {
     index = string_skipSpace(requestString, index);
     length = string_length(requestString + index, " \t", 2);
 
-    if (length > 1) {
-        buffer_appendFromArray(&req->url, ".", 1);
-        buffer_appendFromArray(&req->url, requestString + index, length);
-    } else {
-        buffer_appendFromArray(&req->url, "./index.html", string_length("./index.html", "\0", 1));
-    }
+    buffer_appendFromArray(&req->url, ".", 1);
+    buffer_appendFromArray(&req->url, requestString + index, length);
 }
 
 void *handleRequest(void* args) {
@@ -327,6 +333,24 @@ void *handleRequest(void* args) {
         fprintf(stderr, "URL ");
         buffer_print(&requests[id].url);
         fprintf(stderr, " handled by thread %d\n", id);
+
+        returnVal = buffer_statFile(&requests[id].url, &fileInfo);
+
+        if (returnVal == -1) {
+            perror("Failed to stat url");
+            write(connections[id], NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            close(connections[id]);
+            continue;
+        }
+
+        // URL points to directory. Try to send index.html
+        if ((fileInfo.st_mode & S_IFMT) == S_IFDIR) {
+            if (requests[id].url.data[requests[id].url.length - 1] == '/') {
+                buffer_appendFromString(&requests[id].url, "index.html");
+            } else {
+                buffer_appendFromString(&requests[id].url, "/index.html");
+            }
+        }
 
         int fd = buffer_openFile(&requests[id].url, O_RDONLY);
 
@@ -407,8 +431,6 @@ int main(int argc, char** argv) {
     signal(SIGABRT, onSignal);
     signal(SIGTSTP, onSignal);
     signal(SIGTERM, onSignal);
-
-    // TODO(Tarek): INIT THREADS!!!!
 
     int ids[NUM_THREADS];
     for (int i = 0; i < NUM_THREADS; ++i) {
