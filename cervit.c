@@ -296,14 +296,12 @@ void *handleRequest(void* args) {
 
 
         pthread_mutex_lock(&currentConnectionLock);
-        fprintf(stderr, "Thread %d waiting for request\n", id);
         while(!currentConnectionWriteDone) {
             pthread_cond_wait(&currentConnectionWritten, &currentConnectionLock);
         }
         currentConnectionWriteDone = 0;
         connections[id] = currentConnection;
         currentConnectionReadDone = 1;
-        fprintf(stderr, "Thread %d got request request %d\n", id, currentConnection);
         pthread_mutex_unlock(&currentConnectionLock);
         pthread_cond_signal(&currentConnectionRead);
 
@@ -434,7 +432,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    fprintf(stderr, "Starting cervit on port %d using %ld threads.\n", port, numThreads);
+    fprintf(stderr, "Starting cervit on port %d using %ld threads\n", port, numThreads);
 
     atexit(onClose);
     signal(SIGINT, onSignal);
@@ -442,8 +440,6 @@ int main(int argc, char** argv) {
     signal(SIGABRT, onSignal);
     signal(SIGTSTP, onSignal);
     signal(SIGTERM, onSignal);
-
-
 
     threads = malloc(numThreads * sizeof(pthread_t));
     threadIds = malloc(numThreads * sizeof(int));
@@ -490,13 +486,11 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    fprintf(stderr, "Socket listening.\n");
+    fprintf(stderr, "Socket listening\n");
 
     int connection;
 
     while(1) {
-
-        fprintf(stderr, "Waiting for connection.\n");
         connection = accept(sock, 0, 0);
 
         if (connection == -1) {
@@ -504,17 +498,13 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        fprintf(stderr, "Got connection %d.\n", connection);
-
         pthread_mutex_lock(&currentConnectionLock);
-        fprintf(stderr, "Main thread writing connection.\n");
         currentConnection = connection;
         currentConnectionWriteDone = 1;
         pthread_mutex_unlock(&currentConnectionLock);
         pthread_cond_signal(&currentConnectionWritten);
 
         pthread_mutex_lock(&currentConnectionLock);
-        fprintf(stderr, "Main thread waiting for connection read.\n");
         while(!currentConnectionReadDone) {
             pthread_cond_wait(&currentConnectionRead, &currentConnectionLock);
         }
