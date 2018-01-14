@@ -43,7 +43,7 @@ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 #define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
 
 #define REQUEST_CHUNK_SIZE 32768
-#define NUM_THREADS 1
+#define NUM_THREADS 4
 
 // TODO(Tarek): Threads
 // TODO(Tarek): Check for leaving root dir
@@ -189,6 +189,17 @@ void buffer_appendFromString(Buffer* buffer, const char* string) {
     buffer_appendFromArray(buffer, string, string_length(string, "\0", 1));
 }
 
+int buffer_openFile(Buffer* buffer, int flags) {
+    // If buffer isn't current null-terminated, add null
+    // in first unused byte for the read.
+    if (buffer->data[buffer->length - 1] != '\0') {
+        buffer_checkAllocation(buffer, buffer->length + 1);
+        buffer->data[buffer->length] = '\0';
+    }
+
+    return open(buffer->data, flags);
+}
+
 ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t length) {
     buffer_checkAllocation(buffer, buffer->length + length);
     ssize_t numRead = read(fd, buffer->data + buffer->length, length);
@@ -317,7 +328,7 @@ void *handleRequest(void* args) {
         buffer_print(&requests[id].url);
         fprintf(stderr, " handled by thread %d\n", id);
 
-        int fd = open(requests[id].url.data, O_RDONLY);
+        int fd = buffer_openFile(&requests[id].url, O_RDONLY);
 
         if (fd == -1) {
             perror("Failed to open file");
