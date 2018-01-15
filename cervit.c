@@ -48,8 +48,6 @@ void exit(int status);
 #define REQUEST_CHUNK_SIZE 32768
 
 // TODO(Tarek): Check for leaving root dir
-// TODO(Tarek): Parse URL params/hash
-// TODO(Tarek): Parse headers
 
 typedef struct {
     char* data;
@@ -282,7 +280,7 @@ void parseRequest(char *requestString, Request* req) {
 
     // Get URL
     index = string_skipSpace(requestString, index);
-    length = string_length(requestString + index, " \t", 2);
+    length = string_length(requestString + index, "?# \t", 4);
 
     buffer_appendFromArray(&req->url, ".", 1);
     buffer_appendFromArray(&req->url, requestString + index, length);
@@ -335,9 +333,9 @@ void *handleRequest(void* args) {
         
         parseRequest(requestBuffers[id].data, &requests[id]);
 
-        printf("URL ");
+        fprintf(stderr, "URL ");
         buffer_print(&requests[id].url);
-        printf(" handled by thread %d\n", id);
+        fprintf(stderr, " handled by thread %d\n", id);
 
         returnVal = buffer_statFile(&requests[id].url, &fileInfo);
 
