@@ -224,10 +224,6 @@ ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t length) {
     return numRead;
 } 
 
-void buffer_print(Buffer* buffer) {
-    write(STDOUT_FILENO, buffer->data, buffer->length);
-} 
-
 char *contentTypeHeader(Buffer* filename) {
     size_t offset = filename->length - 1;
     
@@ -334,9 +330,7 @@ void *handleRequest(void* args) {
         
         parseRequest(requestBuffers[id].data, &requests[id]);
 
-        fprintf(stderr, "URL ");
-        buffer_print(&requests[id].url);
-        fprintf(stderr, " handled by thread %d\n", id);
+        printf("URL %.*s handled by thread %d\n", (int) requests[id].url.length, requests[id].url.data, id);
 
         returnVal = buffer_statFile(&requests[id].url, &fileInfo);
 
