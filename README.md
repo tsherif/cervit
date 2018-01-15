@@ -6,11 +6,11 @@ Simple multi-threaded POSIX HTTP server written in C using only system libraries
 Build:
 
 ```bash
-    $ make
+  $ make
 ```
 
 Run:
 
 ```bash
-    $ ./cervit
+  $ ./cervit
 ```

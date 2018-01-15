@@ -488,7 +488,7 @@ int main(int argc, char** argv) {
     }
 
     if (listen(sock, SOMAXCONN) == -1) {
-        perror("Failed to bind");
+        perror("Failed to listen");
         return 1;
     }
 
