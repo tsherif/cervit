@@ -47,6 +47,7 @@ void exit(int status);
 
 #define REQUEST_CHUNK_SIZE 32768
 
+// TODO(Tarek): Directory page
 // TODO(Tarek): Check for leaving root dir
 
 typedef struct {
