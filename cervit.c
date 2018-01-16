@@ -82,9 +82,9 @@ pthread_cond_t currentConnectionRead;
 char currentConnectionWriteDone;
 char currentConnectionReadDone;
 
-size_t string_skipSpace(char* in, size_t index) {
+char* string_skipSpace(char* string) {
     while (1) {
-        char c = in[index];
+        char c = *string;
 
         if (c != ' ' && c != '\t') {
             break;
@@ -94,10 +94,10 @@ size_t string_skipSpace(char* in, size_t index) {
             break;
         }
 
-        ++index;
+        ++string;
     }
 
-    return index;
+    return string;
 }
 
 size_t string_length(const char* string, char* terminators, size_t count) {
@@ -271,17 +271,17 @@ void parseRequest(char *requestString, Request* req) {
     req->url.length = 0;
 
     // Get method
-    int index = string_skipSpace(requestString, 0);
-    int length = string_length(requestString + index, " \t", 2);
-    buffer_appendFromArray(&req->method, requestString + index, length);
-    index += length;
+    requestString = string_skipSpace(requestString);
+    size_t length = string_length(requestString, " \t", 2);
+    buffer_appendFromArray(&req->method, requestString, length);
+    requestString += length;
 
     // Get URL
-    index = string_skipSpace(requestString, index);
-    length = string_length(requestString + index, "?# \t", 4);
+    requestString = string_skipSpace(requestString);
+    length = string_length(requestString, "?# \t", 4);
 
     buffer_appendFromArray(&req->url, ".", 1);
-    buffer_appendFromArray(&req->url, requestString + index, length);
+    buffer_appendFromArray(&req->url, requestString, length);
 }
 
 // Thread main function
