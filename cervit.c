@@ -47,7 +47,6 @@ void exit(int status);
 
 #define REQUEST_CHUNK_SIZE 32768
 
-// TODO(Tarek): URI hex codes
 // TODO(Tarek): Directory page
 // TODO(Tarek): Check for leaving root dir
 
@@ -114,6 +113,28 @@ size_t string_length(const char* string, char* terminators, size_t count) {
 
     done:
     return length;
+}
+
+char string_parseURIHexCode(const char* string) {
+    char result = 0;
+    char multiplier = 16;
+    for (size_t i = 0; i < 2; ++i) {
+        char c = string[i];
+
+        if (c >= 'A' && c <= 'F') {
+            result += multiplier * (10 + c - 'A');
+        } else if (c >= 'a' && c <= 'f') {
+            result += multiplier * (10 + c - 'a');
+        } else if (c >= '0' && c <= '9') {
+            result += multiplier * (c - '0');
+        } else {
+            return '\0';
+        }
+
+        multiplier >>= 4;
+    }
+
+    return result;
 }
 
 unsigned short string_toUshort(const char* string) {
@@ -277,11 +298,22 @@ void parseRequest(char *requestString, Request* req) {
     requestString += length;
 
     // Get URL
-    requestString = string_skipSpace(requestString);
-    length = string_length(requestString, "?# \t", 4);
-
     buffer_appendFromArray(&req->url, ".", 1);
+
+    requestString = string_skipSpace(requestString);
+    length = string_length(requestString, "%?# \t", 4);
     buffer_appendFromArray(&req->url, requestString, length);
+    requestString += length;
+    
+    while (*requestString == '%') {
+        char c = string_parseURIHexCode(requestString + 1);
+        buffer_appendFromArray(&req->url, &c, 1);
+        requestString += 3;
+
+        length = string_length(requestString, "%?# \t", 4);
+        buffer_appendFromArray(&req->url, requestString, length);
+        requestString += length;
+    }
 }
 
 // Thread main function
