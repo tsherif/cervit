@@ -307,7 +307,9 @@ void parseRequest(char *requestString, Request* req) {
     
     while (*requestString == '%') {
         char c = string_parseURIHexCode(requestString + 1);
-        buffer_appendFromArray(&req->url, &c, 1);
+        if (c > 0) {
+            buffer_appendFromArray(&req->url, &c, 1);
+        }
         requestString += 3;
 
         length = string_length(requestString, "%?# \t", 4);
