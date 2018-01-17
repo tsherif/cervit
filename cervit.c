@@ -395,51 +395,80 @@ void *handleRequest(void* args) {
             continue;
         }
 
-        // URL points to directory. Try to send index.html
+        // Handle directory
         if ((fileInfo.st_mode & S_IFMT) == S_IFDIR) {
-            // if (thread->request.url.data[thread->request.url.length - 1] == '/') {
-            //     buffer_appendFromString(&thread->request.url, "index.html");
-            // } else {
-            //     buffer_appendFromString(&thread->request.url, "/index.html");
-            // }
-
             if (thread->request.url.data[thread->request.url.length - 1] != '/') {
                 buffer_appendFromString(&thread->request.url, "/");
             }
 
-            Buffer dirListing;
-            buffer_init(&dirListing, 1024);
-            buffer_appendFromString(&dirListing, HTTP_OK_HEADER "Content-type: text/html" HTTP_NEWLINE HTTP_NEWLINE);
-            buffer_appendFromString(&dirListing, "<html><body><ul>\n");
+            // Try to send index.html
+            size_t baseLength = thread->request.url.length;
+            buffer_appendFromString(&thread->request.url, "index.html");
 
-            buffer_externalNull(&thread->request.url);
-            DIR *dir = opendir(thread->request.url.data);
+            returnVal = buffer_statFile(&thread->request.url, &fileInfo);
 
-            if (!dir) {
-                perror("Failed to open directory");
-                write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            // Otherwise send directory listing.
+            if (returnVal == -1) {
+                thread->request.url.length = baseLength;
+                Buffer dirListing;
+                buffer_init(&dirListing, 1024);
+                buffer_appendFromString(&dirListing, HTTP_OK_HEADER "Content-type: text/html" HTTP_NEWLINE HTTP_NEWLINE);
+                buffer_appendFromString(&dirListing, "<html><body><ul>\n");
+
+                DIR *dir = buffer_openDir(&thread->request.url);
+
+                if (!dir) {
+                    perror("Failed to open directory");
+                    write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+                    close(thread->connection);
+                    continue;
+                }
+                
+                struct dirent* entry = readdir(dir);
+                while (entry) {
+                    if (array_equals(entry->d_name, 2, ".", 2) || array_equals(entry->d_name, 3, "..", 3)) {
+                        entry = readdir(dir);
+                        continue;
+                    }
+
+                    // Remove added entry
+                    thread->request.url.length = baseLength;
+                    
+                    char isDir = 0;
+                    buffer_appendFromString(&thread->request.url, entry->d_name);
+                    returnVal = buffer_statFile(&thread->request.url, &fileInfo);
+
+                    if (returnVal == -1) {
+                        perror("Failed to stat directory entry");
+                    }
+
+                    if ((fileInfo.st_mode & S_IFMT) == S_IFDIR) {
+                        isDir = 1;
+                    }
+
+                    buffer_appendFromString(&dirListing, "<li><a href=\"");
+                    buffer_appendFromArray(&dirListing, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                    if (isDir) {
+                        buffer_appendFromString(&dirListing, "/");
+                    }
+                    buffer_appendFromString(&dirListing, "\">");
+                    buffer_appendFromString(&dirListing, entry->d_name);
+                    if (isDir) {
+                        buffer_appendFromString(&dirListing, "/");
+                    }
+                    buffer_appendFromString(&dirListing, "</a></li>");
+
+                    entry = readdir(dir);
+                }
+                buffer_appendFromString(&dirListing, "</ul></body></html>" HTTP_NEWLINE HTTP_NEWLINE);
+
+                write(thread->connection, dirListing.data, dirListing.length);  
                 close(thread->connection);
+                closedir(dir);
+                buffer_delete(&dirListing);
                 continue;
             }
             
-            struct dirent* entry = readdir(dir);
-            while (entry) {
-                buffer_appendFromString(&dirListing, "<li><a href=\"");
-                buffer_appendFromArray(&dirListing, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
-                buffer_appendFromString(&dirListing, entry->d_name);
-                buffer_appendFromString(&dirListing, "\">");
-                buffer_appendFromString(&dirListing, entry->d_name);
-                buffer_appendFromString(&dirListing, "</a></li>");
-
-                entry = readdir(dir);
-            }
-            buffer_appendFromString(&dirListing, "</ul></body></html>" HTTP_NEWLINE HTTP_NEWLINE);
-
-            write(thread->connection, dirListing.data, dirListing.length);  
-            close(thread->connection);
-            closedir(dir);
-            buffer_delete(&dirListing);
-            continue;
         }
 
         int fd = buffer_openFile(&thread->request.url, O_RDONLY);
