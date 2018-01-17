@@ -48,6 +48,9 @@ void exit(int status);
 #define REQUEST_CHUNK_SIZE 32768
 
 // TODO(Tarek): Directory page
+// TODO(Tarek): Content length for responses
+// TODO(Tarek): HEAD response
+// TODO(Tarek): Not supported response for non-get, non-head requests
 // TODO(Tarek): Check for leaving root dir
 
 typedef struct {
@@ -61,17 +64,22 @@ typedef struct {
     Buffer url;
 } Request;
 
+typedef struct {
+    pthread_t thread;
+    Request request;
+    Buffer requestBuffer;
+    Buffer responseBuffer;    
+    int id;
+    int connection;
+} Thread;
+
 // The listening socket
 int sock;
 
 // Unshared thread variables
 long numThreads;
-pthread_t *threads;
-int *threadIds;
-int *connections;
-Request *requests;
-Buffer *requestBuffers;
-Buffer *responseBuffers;
+Thread* threads;
+
 
 // Shared thread variables
 int currentConnection;
@@ -322,7 +330,7 @@ void parseRequest(char *requestString, Request* req) {
 
 // Thread main function
 void *handleRequest(void* args) {
-    int id = *((int *) args);
+    Thread* thread = (Thread*) args;
 
     struct stat fileInfo;
     int returnVal = 0;
@@ -330,8 +338,8 @@ void *handleRequest(void* args) {
     int received = 0;
 
     while(1) {
-        requestBuffers[id].length = 0;
-        responseBuffers[id].length = 0;
+        thread->requestBuffer.length = 0;
+        thread->responseBuffer.length = 0;
 
         // Communication with main thread.
         pthread_mutex_lock(&currentConnectionLock);
@@ -339,60 +347,60 @@ void *handleRequest(void* args) {
             pthread_cond_wait(&currentConnectionWritten, &currentConnectionLock);
         }
         currentConnectionWriteDone = 0;
-        connections[id] = currentConnection;
+        thread->connection = currentConnection;
         currentConnectionReadDone = 1;
         pthread_mutex_unlock(&currentConnectionLock);
         pthread_cond_signal(&currentConnectionRead);
 
         while(1) {
-            received = recv(connections[id], requestChunk, REQUEST_CHUNK_SIZE, 0);
+            received = recv(thread->connection, requestChunk, REQUEST_CHUNK_SIZE, 0);
 
             if (received < 1) {
                 break;
             }
 
             // In case it's split between chunks.
-            int index = responseBuffers[id].length > 3 ? responseBuffers[id].length - 3 : 0;
-            buffer_appendFromArray(&requestBuffers[id], requestChunk, received);
-            if (array_find(requestBuffers[id].data + index, requestBuffers[id].length - index, "\r\n\r\n", 4) != -1) {
+            int index = thread->responseBuffer.length > 3 ? thread->responseBuffer.length - 3 : 0;
+            buffer_appendFromArray(&thread->requestBuffer, requestChunk, received);
+            if (array_find(thread->requestBuffer.data + index, thread->requestBuffer.length - index, "\r\n\r\n", 4) != -1) {
                 break;
             }
         }
 
         if (received == -1) {
             perror("Failed to receive data");
-            close(connections[id]);
+            close(thread->connection);
             continue;
         }
         
-        parseRequest(requestBuffers[id].data, &requests[id]);
+        parseRequest(thread->requestBuffer.data, &thread->request);
 
-        printf("URL %.*s handled by thread %d\n", (int) requests[id].url.length, requests[id].url.data, id);
+        printf("URL %.*s handled by thread %d\n", (int) thread->request.url.length, thread->request.url.data, thread->id);
 
-        returnVal = buffer_statFile(&requests[id].url, &fileInfo);
+        returnVal = buffer_statFile(&thread->request.url, &fileInfo);
 
         if (returnVal == -1) {
             perror("Failed to stat url");
-            write(connections[id], NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
-            close(connections[id]);
+            write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            close(thread->connection);
             continue;
         }
 
         // URL points to directory. Try to send index.html
         if ((fileInfo.st_mode & S_IFMT) == S_IFDIR) {
-            if (requests[id].url.data[requests[id].url.length - 1] == '/') {
-                buffer_appendFromString(&requests[id].url, "index.html");
+            if (thread->request.url.data[thread->request.url.length - 1] == '/') {
+                buffer_appendFromString(&thread->request.url, "index.html");
             } else {
-                buffer_appendFromString(&requests[id].url, "/index.html");
+                buffer_appendFromString(&thread->request.url, "/index.html");
             }
         }
 
-        int fd = buffer_openFile(&requests[id].url, O_RDONLY);
+        int fd = buffer_openFile(&thread->request.url, O_RDONLY);
 
         if (fd == -1) {
             perror("Failed to open file");
-            write(connections[id], NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
-            close(connections[id]);
+            write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            close(thread->connection);
             continue; 
         }
 
@@ -400,51 +408,44 @@ void *handleRequest(void* args) {
 
         if (returnVal == -1) {
             perror("Failed to stat file");
-            write(connections[id], NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
-            close(connections[id]);
+            write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            close(thread->connection);
             close(fd);
             continue;
         }
 
-        buffer_appendFromArray(&responseBuffers[id], HTTP_OK_HEADER, string_length(HTTP_OK_HEADER, "\0", 1));
-        buffer_appendFromString(&responseBuffers[id], contentTypeHeader(&requests[id].url));
-        buffer_appendFromArray(&responseBuffers[id], HTTP_NEWLINE, string_length(HTTP_NEWLINE, "\0", 4));
+        buffer_appendFromArray(&thread->responseBuffer, HTTP_OK_HEADER, string_length(HTTP_OK_HEADER, "\0", 1));
+        buffer_appendFromString(&thread->responseBuffer, contentTypeHeader(&thread->request.url));
+        buffer_appendFromArray(&thread->responseBuffer, HTTP_NEWLINE, string_length(HTTP_NEWLINE, "\0", 4));
 
-        buffer_checkAllocation(&responseBuffers[id], responseBuffers[id].length + fileInfo.st_size);
-        returnVal = buffer_appendFromFile(&responseBuffers[id], fd, fileInfo.st_size);
+        buffer_checkAllocation(&thread->responseBuffer, thread->responseBuffer.length + fileInfo.st_size);
+        returnVal = buffer_appendFromFile(&thread->responseBuffer, fd, fileInfo.st_size);
 
         if (returnVal == -1) {
             perror("Failed to read file");
-            write(connections[id], NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
-            close(connections[id]);
+            write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            close(thread->connection);
             close(fd);
             continue;
         }
 
-        write(connections[id], responseBuffers[id].data, responseBuffers[id].length);
+        write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
 
-        close(connections[id]);
+        close(thread->connection);
         close(fd);
     }
-
-    
 }
 
 void onClose(void) {
     for (int i = 0; i < numThreads; ++i) {
-        buffer_delete(&requestBuffers[i]);
-        buffer_delete(&responseBuffers[i]);
-        buffer_delete(&requests[i].method);
-        buffer_delete(&requests[i].url);
-        close(connections[i]);
+        buffer_delete(&threads[i].requestBuffer);
+        buffer_delete(&threads[i].responseBuffer);
+        buffer_delete(&threads[i].request.method);
+        buffer_delete(&threads[i].request.url);
+        close(threads[i].connection);
     }
     close(sock);
     free(threads);
-    free(threadIds);
-    free(connections);
-    free(requests);
-    free(requestBuffers);
-    free(responseBuffers);
 }
 
 void onSignal(int sig) {
@@ -478,20 +479,15 @@ int main(int argc, char** argv) {
     signal(SIGTSTP, onSignal);
     signal(SIGTERM, onSignal);
 
-    threads = malloc(numThreads * sizeof(pthread_t));
-    threadIds = malloc(numThreads * sizeof(int));
-    connections = malloc(numThreads * sizeof(int));
-    requests = malloc(numThreads * sizeof(Request));
-    requestBuffers = malloc(numThreads * sizeof(Buffer));
-    responseBuffers = malloc(numThreads * sizeof(Buffer));
-    
+    threads = malloc(numThreads * sizeof(Thread));
+
     for (int i = 0; i < numThreads; ++i) {
-        threadIds[i] = i;
-        pthread_create(&threads[i], NULL, handleRequest, &threadIds[i]);
-        buffer_init(&requests[i].method, 16);
-        buffer_init(&requests[i].url, 1024);
-        buffer_init(&requestBuffers[i], 2048);
-        buffer_init(&responseBuffers[i], 512);
+        threads[i].id = i;
+        pthread_create(&threads[i].thread, NULL, handleRequest, &threads[i]);
+        buffer_init(&threads[i].request.method, 16);
+        buffer_init(&threads[i].request.url, 1024);
+        buffer_init(&threads[i].requestBuffer, 2048);
+        buffer_init(&threads[i].responseBuffer, 512);
     }
 
     pthread_mutex_init(&currentConnectionLock, NULL);
