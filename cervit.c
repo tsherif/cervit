@@ -446,6 +446,7 @@ void *handleRequest(void* args) {
                     } else if (entry.d_type == DT_REG) {
                         isDir = 0;
                     } else {
+                        readdir_r(dir, &entry, &entryp);
                         continue;
                     }
 
