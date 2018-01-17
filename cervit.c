@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <pthread.h>
+#include <dirent.h>
 
 // Forward declare so I don't have to include stdlib.h, string.h
 void *malloc(size_t size);
@@ -48,6 +49,7 @@ void exit(int status);
 #define REQUEST_CHUNK_SIZE 32768
 
 // TODO(Tarek): Directory page
+// TODO(Tarek): Response headers
 // TODO(Tarek): Content length for responses
 // TODO(Tarek): HEAD response
 // TODO(Tarek): Not supported response for non-get, non-head requests
@@ -223,26 +225,33 @@ void buffer_appendFromString(Buffer* buffer, const char* string) {
     buffer_appendFromArray(buffer, string, string_length(string, "\0", 1));
 }
 
-int buffer_openFile(Buffer* buffer, int flags) {
+// If buffer isn't currently null-terminated, add null
+// in first unused byte.
+void buffer_externalNull(Buffer* buffer) {
     // If buffer isn't currently null-terminated, add null
     // in first unused byte for the read.
     if (buffer->data[buffer->length - 1] != '\0') {
         buffer_checkAllocation(buffer, buffer->length + 1);
         buffer->data[buffer->length] = '\0';
     }
+}
+
+int buffer_openFile(Buffer* buffer, int flags) {
+    buffer_externalNull(buffer);
 
     return open(buffer->data, flags);
 }
 
 int buffer_statFile(Buffer* buffer, struct stat *fileInfo) {
-    // If buffer isn't currently null-terminated, add null
-    // in first unused byte for the stat.
-    if (buffer->data[buffer->length - 1] != '\0') {
-        buffer_checkAllocation(buffer, buffer->length + 1);
-        buffer->data[buffer->length] = '\0';
-    }
+    buffer_externalNull(buffer);
 
     return stat(buffer->data, fileInfo);
+}
+
+DIR* buffer_openDir(Buffer* buffer) {
+    buffer_externalNull(buffer);
+
+    return opendir(buffer->data);
 }
 
 ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t length) {
@@ -388,11 +397,49 @@ void *handleRequest(void* args) {
 
         // URL points to directory. Try to send index.html
         if ((fileInfo.st_mode & S_IFMT) == S_IFDIR) {
-            if (thread->request.url.data[thread->request.url.length - 1] == '/') {
-                buffer_appendFromString(&thread->request.url, "index.html");
-            } else {
-                buffer_appendFromString(&thread->request.url, "/index.html");
+            // if (thread->request.url.data[thread->request.url.length - 1] == '/') {
+            //     buffer_appendFromString(&thread->request.url, "index.html");
+            // } else {
+            //     buffer_appendFromString(&thread->request.url, "/index.html");
+            // }
+
+            if (thread->request.url.data[thread->request.url.length - 1] != '/') {
+                buffer_appendFromString(&thread->request.url, "/");
             }
+
+            Buffer dirListing;
+            buffer_init(&dirListing, 1024);
+            buffer_appendFromString(&dirListing, HTTP_OK_HEADER "Content-type: text/html" HTTP_NEWLINE HTTP_NEWLINE);
+            buffer_appendFromString(&dirListing, "<html><body><ul>\n");
+
+            buffer_externalNull(&thread->request.url);
+            DIR *dir = opendir(thread->request.url.data);
+
+            if (!dir) {
+                perror("Failed to open directory");
+                write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+                close(thread->connection);
+                continue;
+            }
+            
+            struct dirent* entry = readdir(dir);
+            while (entry) {
+                buffer_appendFromString(&dirListing, "<li><a href=\"");
+                buffer_appendFromArray(&dirListing, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                buffer_appendFromString(&dirListing, entry->d_name);
+                buffer_appendFromString(&dirListing, "\">");
+                buffer_appendFromString(&dirListing, entry->d_name);
+                buffer_appendFromString(&dirListing, "</a></li>");
+
+                entry = readdir(dir);
+            }
+            buffer_appendFromString(&dirListing, "</ul></body></html>" HTTP_NEWLINE HTTP_NEWLINE);
+
+            write(thread->connection, dirListing.data, dirListing.length);  
+            close(thread->connection);
+            closedir(dir);
+            buffer_delete(&dirListing);
+            continue;
         }
 
         int fd = buffer_openFile(&thread->request.url, O_RDONLY);
