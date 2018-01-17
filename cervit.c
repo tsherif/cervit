@@ -413,7 +413,9 @@ void *handleRequest(void* args) {
                 Buffer dirListing;
                 buffer_init(&dirListing, 1024);
                 buffer_appendFromString(&dirListing, HTTP_OK_HEADER "Content-type: text/html" HTTP_NEWLINE HTTP_NEWLINE);
-                buffer_appendFromString(&dirListing, "<html><body><ul>\n");
+                buffer_appendFromString(&dirListing, "<html><body><h1>Directory listing for: ");
+                buffer_appendFromArray(&dirListing, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                buffer_appendFromString(&dirListing, "</h1><ul>\n");
 
                 DIR *dir = buffer_openDir(&thread->request.url);
 
@@ -424,10 +426,12 @@ void *handleRequest(void* args) {
                     continue;
                 }
                 
-                struct dirent* entry = readdir(dir);
-                while (entry) {
-                    if (array_equals(entry->d_name, 2, ".", 2) || array_equals(entry->d_name, 3, "..", 3)) {
-                        entry = readdir(dir);
+                struct dirent entry;
+                struct dirent* entryp;
+                readdir_r(dir, &entry, &entryp);
+                while (entryp) {
+                    if (array_equals(entry.d_name, 2, ".", 2) || array_equals(entry.d_name, 3, "..", 3)) {
+                        readdir_r(dir, &entry, &entryp);
                         continue;
                     }
 
@@ -435,7 +439,7 @@ void *handleRequest(void* args) {
                     thread->request.url.length = baseLength;
                     
                     char isDir = 0;
-                    buffer_appendFromString(&thread->request.url, entry->d_name);
+                    buffer_appendFromString(&thread->request.url, entry.d_name);
                     returnVal = buffer_statFile(&thread->request.url, &fileInfo);
 
                     if (returnVal == -1) {
@@ -452,13 +456,13 @@ void *handleRequest(void* args) {
                         buffer_appendFromString(&dirListing, "/");
                     }
                     buffer_appendFromString(&dirListing, "\">");
-                    buffer_appendFromString(&dirListing, entry->d_name);
+                    buffer_appendFromString(&dirListing, entry.d_name);
                     if (isDir) {
                         buffer_appendFromString(&dirListing, "/");
                     }
                     buffer_appendFromString(&dirListing, "</a></li>");
 
-                    entry = readdir(dir);
+                    readdir_r(dir, &entry, &entryp);
                 }
                 buffer_appendFromString(&dirListing, "</ul></body></html>" HTTP_NEWLINE HTTP_NEWLINE);
 
@@ -466,7 +470,6 @@ void *handleRequest(void* args) {
                 close(thread->connection);
                 closedir(dir);
                 buffer_delete(&dirListing);
-                continue;
             }
             
         }
