@@ -37,6 +37,7 @@ void *malloc(size_t size);
 void *realloc(void *ptr, size_t size);
 void free(void *ptr);
 void *memcpy(void * restrict dest, const void * restrict src, size_t n);
+void qsort(void *array, size_t n, size_t size, int (*compar)(const void *, const void *));
 int atexit(void (*func)(void));
 void exit(int status);
 
@@ -337,6 +338,37 @@ void parseRequest(char *requestString, Request* req) {
     }
 }
 
+int compareDirEntries(const void* a, const void* b) {
+    struct dirent* entry1 = (struct dirent*) a;
+    struct dirent* entry2 = (struct dirent*) b;
+
+    char* name1 = entry1->d_name;
+    char* name2 = entry2->d_name;
+
+    size_t i = 0;
+    while (name1[i] || name2[i]) {
+        if (!name1[i]) {
+            // Name 1 is shorter
+            return -1;
+        }
+
+        if (!name2[i]) {
+            // Name 2 is shorter
+            return 1;
+        }
+
+        int cmp = name1[i] - name2[i];
+
+        if (cmp != 0) {
+            return cmp;
+        }
+
+        ++i;
+    }
+
+    return 0;
+}
+
 // Thread main function
 void *handleRequest(void* args) {
     Thread* thread = (Thread*) args;
@@ -428,6 +460,38 @@ void *handleRequest(void* args) {
                 
                 struct dirent entry;
                 struct dirent* entryp;
+
+                size_t dirCount = 0;
+                size_t fileCount = 0;
+
+                readdir_r(dir, &entry, &entryp);
+                while (entryp) {
+                    if (array_equals(entry.d_name, 2, ".", 2) || array_equals(entry.d_name, 3, "..", 3)) {
+                        readdir_r(dir, &entry, &entryp);
+                        continue;
+                    }
+
+                    // Remove added entry name
+                    thread->request.url.length = baseLength;
+                    
+                    buffer_appendFromString(&thread->request.url, entry.d_name);
+
+                    if (entry.d_type == DT_DIR) {
+                        ++dirCount;
+                    } else if (entry.d_type == DT_REG) {
+                        ++fileCount;
+                    }
+
+                    readdir_r(dir, &entry, &entryp);
+                }
+
+                struct dirent directories[dirCount];
+                struct dirent files[fileCount];
+                size_t currentDir = 0;
+                size_t currentFile = 0;
+
+                rewinddir(dir);
+
                 readdir_r(dir, &entry, &entryp);
                 while (entryp) {
                     if (array_equals(entry.d_name, 2, ".", 2) || array_equals(entry.d_name, 3, "..", 3)) {
@@ -438,31 +502,40 @@ void *handleRequest(void* args) {
                     // Remove added entry
                     thread->request.url.length = baseLength;
                     
-                    char isDir = 0;
                     buffer_appendFromString(&thread->request.url, entry.d_name);
 
                     if (entry.d_type == DT_DIR) {
-                        isDir = 1;
+                        directories[currentDir] = entry;
+                        ++currentDir; 
                     } else if (entry.d_type == DT_REG) {
-                        isDir = 0;
-                    } else {
-                        readdir_r(dir, &entry, &entryp);
-                        continue;
+                        files[currentFile] = entry;
+                        ++currentFile;
                     }
-
-                    buffer_appendFromString(&dirListing, "<li><a href=\"");
-                    buffer_appendFromArray(&dirListing, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
-                    if (isDir) {
-                        buffer_appendFromString(&dirListing, "/");
-                    }
-                    buffer_appendFromString(&dirListing, "\">");
-                    buffer_appendFromString(&dirListing, entry.d_name);
-                    if (isDir) {
-                        buffer_appendFromString(&dirListing, "/");
-                    }
-                    buffer_appendFromString(&dirListing, "</a></li>");
 
                     readdir_r(dir, &entry, &entryp);
+                }
+
+                qsort(directories, dirCount, sizeof(struct dirent), compareDirEntries);
+                qsort(files, fileCount, sizeof(struct dirent), compareDirEntries);
+
+                thread->request.url.length = baseLength;
+                
+                for (size_t i = 0; i < dirCount; ++i) {
+                    buffer_appendFromString(&dirListing, "<li><a href=\"");
+                    buffer_appendFromArray(&dirListing, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                    buffer_appendFromString(&dirListing, directories[i].d_name);
+                    buffer_appendFromString(&dirListing, "/\">");
+                    buffer_appendFromString(&dirListing, directories[i].d_name);
+                    buffer_appendFromString(&dirListing, "/</a></li>");
+                }
+
+                for (size_t i = 0; i < fileCount; ++i) {
+                    buffer_appendFromString(&dirListing, "<li><a href=\"");
+                    buffer_appendFromArray(&dirListing, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                    buffer_appendFromString(&dirListing, files[i].d_name);
+                    buffer_appendFromString(&dirListing, "\">");
+                    buffer_appendFromString(&dirListing, files[i].d_name);
+                    buffer_appendFromString(&dirListing, "</a></li>");
                 }
                 buffer_appendFromString(&dirListing, "</ul></body></html>" HTTP_NEWLINE HTTP_NEWLINE);
 
