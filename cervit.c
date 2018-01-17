@@ -440,14 +440,13 @@ void *handleRequest(void* args) {
                     
                     char isDir = 0;
                     buffer_appendFromString(&thread->request.url, entry.d_name);
-                    returnVal = buffer_statFile(&thread->request.url, &fileInfo);
 
-                    if (returnVal == -1) {
-                        perror("Failed to stat directory entry");
-                    }
-
-                    if ((fileInfo.st_mode & S_IFMT) == S_IFDIR) {
+                    if (entry.d_type == DT_DIR) {
                         isDir = 1;
+                    } else if (entry.d_type == DT_REG) {
+                        isDir = 0;
+                    } else {
+                        continue;
                     }
 
                     buffer_appendFromString(&dirListing, "<li><a href=\"");
