@@ -30,6 +30,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <pthread.h>
+#include <dirent.h>
 
 // Forward declare so I don't have to include stdlib.h, string.h
 void *malloc(size_t size);
@@ -47,7 +48,12 @@ void exit(int status);
 
 #define REQUEST_CHUNK_SIZE 32768
 
-// TODO(Tarek): Directory page
+// TODO(Tarek): Check error codes for threads, clean up threads on exit
+// TODO(Tarek): More mime types: txt, json, video, audio
+// TODO(Tarek): Response headers
+// TODO(Tarek): Content length for responses
+// TODO(Tarek): HEAD response
+// TODO(Tarek): Not supported response for non-get, non-head requests
 // TODO(Tarek): Check for leaving root dir
 
 typedef struct {
@@ -61,17 +67,25 @@ typedef struct {
     Buffer url;
 } Request;
 
+typedef struct {
+    pthread_t thread;
+    Request request;
+    Buffer requestBuffer;
+    Buffer responseBuffer;
+    Buffer dirListingBuffer;
+    Buffer dirnameBuffer;
+    Buffer filenameBuffer;
+    int id;
+    int connection;
+} Thread;
+
 // The listening socket
 int sock;
 
 // Unshared thread variables
 long numThreads;
-pthread_t *threads;
-int *threadIds;
-int *connections;
-Request *requests;
-Buffer *requestBuffers;
-Buffer *responseBuffers;
+Thread* threads;
+
 
 // Shared thread variables
 int currentConnection;
@@ -113,6 +127,31 @@ size_t string_length(const char* string, char* terminators, size_t count) {
 
     done:
     return length;
+}
+
+int string_compare(char* string1, char* string2) {
+    size_t i = 0;
+    while (string1[i] || string2[i]) {
+        if (!string1[i]) {
+            // Name 1 is shorter
+            return -1;
+        }
+
+        if (!string2[i]) {
+            // Name 2 is shorter
+            return 1;
+        }
+
+        int cmp = string1[i] - string2[i];
+
+        if (cmp != 0) {
+            return cmp;
+        }
+
+        ++i;
+    }
+
+    return 0;
 }
 
 char string_parseURIHexCode(const char* string) {
@@ -215,26 +254,37 @@ void buffer_appendFromString(Buffer* buffer, const char* string) {
     buffer_appendFromArray(buffer, string, string_length(string, "\0", 1));
 }
 
-int buffer_openFile(Buffer* buffer, int flags) {
+void buffer_appendFromIterator(Buffer* buffer, const char* begin, const char* end) {
+    buffer_appendFromArray(buffer, begin, end - begin);
+}
+
+// If buffer isn't currently null-terminated, add null
+// in first unused byte.
+void buffer_externalNull(Buffer* buffer) {
     // If buffer isn't currently null-terminated, add null
     // in first unused byte for the read.
     if (buffer->data[buffer->length - 1] != '\0') {
         buffer_checkAllocation(buffer, buffer->length + 1);
         buffer->data[buffer->length] = '\0';
     }
+}
+
+int buffer_openFile(Buffer* buffer, int flags) {
+    buffer_externalNull(buffer);
 
     return open(buffer->data, flags);
 }
 
 int buffer_statFile(Buffer* buffer, struct stat *fileInfo) {
-    // If buffer isn't currently null-terminated, add null
-    // in first unused byte for the stat.
-    if (buffer->data[buffer->length - 1] != '\0') {
-        buffer_checkAllocation(buffer, buffer->length + 1);
-        buffer->data[buffer->length] = '\0';
-    }
+    buffer_externalNull(buffer);
 
     return stat(buffer->data, fileInfo);
+}
+
+DIR* buffer_openDir(Buffer* buffer) {
+    buffer_externalNull(buffer);
+
+    return opendir(buffer->data);
 }
 
 ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t length) {
@@ -320,9 +370,26 @@ void parseRequest(char *requestString, Request* req) {
     }
 }
 
+void sortNameList(char** list, size_t length) {
+    char *current;
+    for (size_t i = 1; i < length; ++i) {
+        current = list[i];
+        size_t j = i;
+        while (j > 0) {
+            if (string_compare(current, list[j - 1]) < 0) {
+                list[j] = list[j - 1];
+            } else {
+                break;
+            }
+            --j;
+        }
+        list[j] = current;
+    }
+}
+
 // Thread main function
 void *handleRequest(void* args) {
-    int id = *((int *) args);
+    Thread* thread = (Thread*) args;
 
     struct stat fileInfo;
     int returnVal = 0;
@@ -330,8 +397,8 @@ void *handleRequest(void* args) {
     int received = 0;
 
     while(1) {
-        requestBuffers[id].length = 0;
-        responseBuffers[id].length = 0;
+        thread->requestBuffer.length = 0;
+        thread->responseBuffer.length = 0;
 
         // Communication with main thread.
         pthread_mutex_lock(&currentConnectionLock);
@@ -339,60 +406,174 @@ void *handleRequest(void* args) {
             pthread_cond_wait(&currentConnectionWritten, &currentConnectionLock);
         }
         currentConnectionWriteDone = 0;
-        connections[id] = currentConnection;
+        thread->connection = currentConnection;
         currentConnectionReadDone = 1;
         pthread_mutex_unlock(&currentConnectionLock);
         pthread_cond_signal(&currentConnectionRead);
 
         while(1) {
-            received = recv(connections[id], requestChunk, REQUEST_CHUNK_SIZE, 0);
+            received = recv(thread->connection, requestChunk, REQUEST_CHUNK_SIZE, 0);
 
             if (received < 1) {
                 break;
             }
 
             // In case it's split between chunks.
-            int index = responseBuffers[id].length > 3 ? responseBuffers[id].length - 3 : 0;
-            buffer_appendFromArray(&requestBuffers[id], requestChunk, received);
-            if (array_find(requestBuffers[id].data + index, requestBuffers[id].length - index, "\r\n\r\n", 4) != -1) {
+            int index = thread->responseBuffer.length > 3 ? thread->responseBuffer.length - 3 : 0;
+            buffer_appendFromArray(&thread->requestBuffer, requestChunk, received);
+            if (array_find(thread->requestBuffer.data + index, thread->requestBuffer.length - index, "\r\n\r\n", 4) != -1) {
                 break;
             }
         }
 
         if (received == -1) {
             perror("Failed to receive data");
-            close(connections[id]);
+            close(thread->connection);
             continue;
         }
         
-        parseRequest(requestBuffers[id].data, &requests[id]);
+        parseRequest(thread->requestBuffer.data, &thread->request);
 
-        printf("URL %.*s handled by thread %d\n", (int) requests[id].url.length, requests[id].url.data, id);
+        printf("URL %.*s handled by thread %d\n", (int) thread->request.url.length, thread->request.url.data, thread->id);
 
-        returnVal = buffer_statFile(&requests[id].url, &fileInfo);
+        returnVal = buffer_statFile(&thread->request.url, &fileInfo);
 
         if (returnVal == -1) {
             perror("Failed to stat url");
-            write(connections[id], NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
-            close(connections[id]);
+            write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            close(thread->connection);
             continue;
         }
 
-        // URL points to directory. Try to send index.html
+        // Handle directory
         if ((fileInfo.st_mode & S_IFMT) == S_IFDIR) {
-            if (requests[id].url.data[requests[id].url.length - 1] == '/') {
-                buffer_appendFromString(&requests[id].url, "index.html");
-            } else {
-                buffer_appendFromString(&requests[id].url, "/index.html");
+            if (thread->request.url.data[thread->request.url.length - 1] != '/') {
+                buffer_appendFromString(&thread->request.url, "/");
             }
+
+            // Try to send index.html
+            size_t baseLength = thread->request.url.length;
+            buffer_appendFromString(&thread->request.url, "index.html");
+
+            returnVal = buffer_statFile(&thread->request.url, &fileInfo);
+
+            // Otherwise send directory listing.
+            if (returnVal == -1) {
+                thread->dirListingBuffer.length = 0;
+                thread->dirnameBuffer.length = 0;
+                thread->filenameBuffer.length = 0;
+                thread->request.url.length = baseLength;
+                buffer_appendFromString(&thread->dirListingBuffer, HTTP_OK_HEADER "Content-type: text/html" HTTP_NEWLINE HTTP_NEWLINE);
+                buffer_appendFromString(&thread->dirListingBuffer, "<html><body><h1>Directory listing for: ");
+                buffer_appendFromArray(&thread->dirListingBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                buffer_appendFromString(&thread->dirListingBuffer, "</h1><ul>\n");
+
+                DIR *dir = buffer_openDir(&thread->request.url);
+
+                if (!dir) {
+                    perror("Failed to open directory");
+                    write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+                    close(thread->connection);
+                    continue;
+                }
+                
+                struct dirent entry;
+                struct dirent* entryp;
+
+                size_t dirCount = 0;
+                size_t fileCount = 0;
+
+                readdir_r(dir, &entry, &entryp);
+                while (entryp) {
+                    if (array_equals(entry.d_name, 2, ".", 2) || array_equals(entry.d_name, 3, "..", 3)) {
+                        readdir_r(dir, &entry, &entryp);
+                        continue;
+                    }
+
+                    // Remove added entry name
+                    thread->request.url.length = baseLength;
+                    
+                    buffer_appendFromString(&thread->request.url, entry.d_name);
+
+                    if (entry.d_type == DT_DIR) {
+                        buffer_appendFromString(&thread->dirnameBuffer, entry.d_name); 
+                        buffer_appendFromArray(&thread->dirnameBuffer, "", 1); 
+                        ++dirCount;
+                    } else if (entry.d_type == DT_REG) {
+                        buffer_appendFromString(&thread->filenameBuffer, entry.d_name); 
+                        buffer_appendFromArray(&thread->filenameBuffer, "", 1); 
+                        ++fileCount;
+                    }
+
+                    readdir_r(dir, &entry, &entryp);
+                }
+
+                char* directoryNames[dirCount];
+                char* filenames[fileCount];
+                size_t currentFile = 1;
+                size_t currentDir = 1;
+
+                directoryNames[0] = thread->dirnameBuffer.data;
+                filenames[0] = thread->filenameBuffer.data;
+
+                char* current = thread->dirnameBuffer.data;
+                char* end = thread->dirnameBuffer.data + thread->dirnameBuffer.length;
+                while (current != end && currentDir < dirCount) {
+                    if (*current == '\0') {
+                        directoryNames[currentDir] = current + 1;
+                        ++currentDir;
+                    }
+                    ++current;
+                }
+
+                current = thread->filenameBuffer.data;
+                end = thread->filenameBuffer.data + thread->filenameBuffer.length;
+                while (current != end && currentFile < fileCount) {
+                    if (*current == '\0') {
+                        filenames[currentFile] = current + 1;
+                        ++currentFile;
+                    }
+                    ++current;
+                }
+
+                sortNameList(directoryNames, dirCount);
+                sortNameList(filenames, fileCount);
+
+                thread->request.url.length = baseLength;
+                
+                for (size_t i = 0; i < dirCount; ++i) {
+                    buffer_appendFromString(&thread->dirListingBuffer, "<li><a href=\"");
+                    buffer_appendFromArray(&thread->dirListingBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                    buffer_appendFromString(&thread->dirListingBuffer, directoryNames[i]);
+                    buffer_appendFromString(&thread->dirListingBuffer, "/\">");
+                    buffer_appendFromString(&thread->dirListingBuffer, directoryNames[i]);
+                    buffer_appendFromString(&thread->dirListingBuffer, "/</a></li>");
+                }
+
+                for (size_t i = 0; i < fileCount; ++i) {
+                    buffer_appendFromString(&thread->dirListingBuffer, "<li><a href=\"");
+                    buffer_appendFromArray(&thread->dirListingBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                    buffer_appendFromString(&thread->dirListingBuffer, filenames[i]);
+                    buffer_appendFromString(&thread->dirListingBuffer, "\">");
+                    buffer_appendFromString(&thread->dirListingBuffer, filenames[i]);
+                    buffer_appendFromString(&thread->dirListingBuffer, "</a></li>");
+                }
+                buffer_appendFromString(&thread->dirListingBuffer, "</ul></body></html>" HTTP_NEWLINE HTTP_NEWLINE);
+
+                write(thread->connection, thread->dirListingBuffer.data, thread->dirListingBuffer.length);  
+                close(thread->connection);
+                closedir(dir);
+                continue;
+            }
+            
         }
 
-        int fd = buffer_openFile(&requests[id].url, O_RDONLY);
+        int fd = buffer_openFile(&thread->request.url, O_RDONLY);
 
         if (fd == -1) {
             perror("Failed to open file");
-            write(connections[id], NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
-            close(connections[id]);
+            write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            close(thread->connection);
             continue; 
         }
 
@@ -400,51 +581,47 @@ void *handleRequest(void* args) {
 
         if (returnVal == -1) {
             perror("Failed to stat file");
-            write(connections[id], NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
-            close(connections[id]);
+            write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            close(thread->connection);
             close(fd);
             continue;
         }
 
-        buffer_appendFromArray(&responseBuffers[id], HTTP_OK_HEADER, string_length(HTTP_OK_HEADER, "\0", 1));
-        buffer_appendFromString(&responseBuffers[id], contentTypeHeader(&requests[id].url));
-        buffer_appendFromArray(&responseBuffers[id], HTTP_NEWLINE, string_length(HTTP_NEWLINE, "\0", 4));
+        buffer_appendFromArray(&thread->responseBuffer, HTTP_OK_HEADER, string_length(HTTP_OK_HEADER, "\0", 1));
+        buffer_appendFromString(&thread->responseBuffer, contentTypeHeader(&thread->request.url));
+        buffer_appendFromArray(&thread->responseBuffer, HTTP_NEWLINE, string_length(HTTP_NEWLINE, "\0", 4));
 
-        buffer_checkAllocation(&responseBuffers[id], responseBuffers[id].length + fileInfo.st_size);
-        returnVal = buffer_appendFromFile(&responseBuffers[id], fd, fileInfo.st_size);
+        buffer_checkAllocation(&thread->responseBuffer, thread->responseBuffer.length + fileInfo.st_size);
+        returnVal = buffer_appendFromFile(&thread->responseBuffer, fd, fileInfo.st_size);
 
         if (returnVal == -1) {
             perror("Failed to read file");
-            write(connections[id], NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
-            close(connections[id]);
+            write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            close(thread->connection);
             close(fd);
             continue;
         }
 
-        write(connections[id], responseBuffers[id].data, responseBuffers[id].length);
+        write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
 
-        close(connections[id]);
+        close(thread->connection);
         close(fd);
     }
-
-    
 }
 
 void onClose(void) {
     for (int i = 0; i < numThreads; ++i) {
-        buffer_delete(&requestBuffers[i]);
-        buffer_delete(&responseBuffers[i]);
-        buffer_delete(&requests[i].method);
-        buffer_delete(&requests[i].url);
-        close(connections[i]);
+        buffer_delete(&threads[i].requestBuffer);
+        buffer_delete(&threads[i].responseBuffer);
+        buffer_delete(&threads[i].request.method);
+        buffer_delete(&threads[i].request.url);
+        buffer_delete(&threads[i].dirListingBuffer);
+        buffer_delete(&threads[i].dirnameBuffer);
+        buffer_delete(&threads[i].filenameBuffer);
+        close(threads[i].connection);
     }
     close(sock);
     free(threads);
-    free(threadIds);
-    free(connections);
-    free(requests);
-    free(requestBuffers);
-    free(responseBuffers);
 }
 
 void onSignal(int sig) {
@@ -478,20 +655,18 @@ int main(int argc, char** argv) {
     signal(SIGTSTP, onSignal);
     signal(SIGTERM, onSignal);
 
-    threads = malloc(numThreads * sizeof(pthread_t));
-    threadIds = malloc(numThreads * sizeof(int));
-    connections = malloc(numThreads * sizeof(int));
-    requests = malloc(numThreads * sizeof(Request));
-    requestBuffers = malloc(numThreads * sizeof(Buffer));
-    responseBuffers = malloc(numThreads * sizeof(Buffer));
-    
+    threads = malloc(numThreads * sizeof(Thread));
+
     for (int i = 0; i < numThreads; ++i) {
-        threadIds[i] = i;
-        pthread_create(&threads[i], NULL, handleRequest, &threadIds[i]);
-        buffer_init(&requests[i].method, 16);
-        buffer_init(&requests[i].url, 1024);
-        buffer_init(&requestBuffers[i], 2048);
-        buffer_init(&responseBuffers[i], 512);
+        threads[i].id = i;
+        pthread_create(&threads[i].thread, NULL, handleRequest, &threads[i]);
+        buffer_init(&threads[i].request.method, 16);
+        buffer_init(&threads[i].request.url, 1024);
+        buffer_init(&threads[i].requestBuffer, 2048);
+        buffer_init(&threads[i].responseBuffer, 1024);
+        buffer_init(&threads[i].dirListingBuffer, 512);
+        buffer_init(&threads[i].dirnameBuffer, 512);
+        buffer_init(&threads[i].filenameBuffer, 512);
     }
 
     pthread_mutex_init(&currentConnectionLock, NULL);
