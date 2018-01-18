@@ -254,10 +254,6 @@ void buffer_appendFromString(Buffer* buffer, const char* string) {
     buffer_appendFromArray(buffer, string, string_length(string, "\0", 1));
 }
 
-void buffer_appendFromIterator(Buffer* buffer, const char* begin, const char* end) {
-    buffer_appendFromArray(buffer, begin, end - begin);
-}
-
 // If buffer isn't currently null-terminated, add null
 // in first unused byte.
 void buffer_externalNull(Buffer* buffer) {
