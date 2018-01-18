@@ -347,27 +347,22 @@ void parseRequest(char *requestString, Request* req) {
 }
 
 int compareNameList(const void* a, const void* b) {
-    char** ptr1 = (char **) a;
-    char** ptr2 = (char **) b;
-
-    char* start1 = ptr1[0];
-    char* end1 = ptr1[1];
-    char* start2 = ptr2[0];
-    char* end2 = ptr2[1];
+    char* name1 = *((char **) a);
+    char* name2 = *((char **) b);
 
     size_t i = 0;
-    while (start1 + i != end1 || start2 + i != end2) {
-        if (start1 + i == end1) {
+    while (name1[i] || name2[i]) {
+        if (!name1[i]) {
             // Name 1 is shorter
             return -1;
         }
 
-        if (start2 + i == end2) {
+        if (!name2[i]) {
             // Name 2 is shorter
             return 1;
         }
 
-        int cmp = start1[i] - start2[i];
+        int cmp = name1[i] - name2[i];
 
         if (cmp != 0) {
             return cmp;
