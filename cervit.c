@@ -49,7 +49,7 @@ void exit(int status);
 
 #define REQUEST_CHUNK_SIZE 32768
 
-// TODO(Tarek): Directory page
+// TODO(Tarek): Replace qsort in dir listing.
 // TODO(Tarek): Check error codes for threads, clean up threads on exit
 // TODO(Tarek): Response headers
 // TODO(Tarek): Content length for responses
