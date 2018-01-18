@@ -37,7 +37,6 @@ void *malloc(size_t size);
 void *realloc(void *ptr, size_t size);
 void free(void *ptr);
 void *memcpy(void * restrict dest, const void * restrict src, size_t n);
-void qsort(void *array, size_t n, size_t size, int (*compar)(const void *, const void *));
 int atexit(void (*func)(void));
 void exit(int status);
 
@@ -49,8 +48,8 @@ void exit(int status);
 
 #define REQUEST_CHUNK_SIZE 32768
 
-// TODO(Tarek): Replace qsort in dir listing.
 // TODO(Tarek): Check error codes for threads, clean up threads on exit
+// TODO(Tarek): More mime types: txt, json, video, audio
 // TODO(Tarek): Response headers
 // TODO(Tarek): Content length for responses
 // TODO(Tarek): HEAD response
@@ -128,6 +127,31 @@ size_t string_length(const char* string, char* terminators, size_t count) {
 
     done:
     return length;
+}
+
+int string_compare(char* string1, char* string2) {
+    size_t i = 0;
+    while (string1[i] || string2[i]) {
+        if (!string1[i]) {
+            // Name 1 is shorter
+            return -1;
+        }
+
+        if (!string2[i]) {
+            // Name 2 is shorter
+            return 1;
+        }
+
+        int cmp = string1[i] - string2[i];
+
+        if (cmp != 0) {
+            return cmp;
+        }
+
+        ++i;
+    }
+
+    return 0;
 }
 
 char string_parseURIHexCode(const char* string) {
@@ -346,32 +370,21 @@ void parseRequest(char *requestString, Request* req) {
     }
 }
 
-int compareNameList(const void* a, const void* b) {
-    char* name1 = *((char **) a);
-    char* name2 = *((char **) b);
-
-    size_t i = 0;
-    while (name1[i] || name2[i]) {
-        if (!name1[i]) {
-            // Name 1 is shorter
-            return -1;
+void sortNameList(char** list, size_t length) {
+    char *current;
+    for (size_t i = 1; i < length; ++i) {
+        current = list[i];
+        size_t j = i;
+        while (j > 0) {
+            if (string_compare(current, list[j - 1]) < 0) {
+                list[j] = list[j - 1];
+            } else {
+                break;
+            }
+            --j;
         }
-
-        if (!name2[i]) {
-            // Name 2 is shorter
-            return 1;
-        }
-
-        int cmp = name1[i] - name2[i];
-
-        if (cmp != 0) {
-            return cmp;
-        }
-
-        ++i;
+        list[j] = current;
     }
-
-    return 0;
 }
 
 // Thread main function
@@ -523,8 +536,8 @@ void *handleRequest(void* args) {
                     ++current;
                 }
 
-                qsort(directoryNames, dirCount, sizeof(char *), compareNameList);
-                qsort(filenames, fileCount, sizeof(char *), compareNameList);
+                sortNameList(directoryNames, dirCount);
+                sortNameList(filenames, fileCount);
 
                 thread->request.url.length = baseLength;
                 
