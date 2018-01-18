@@ -483,8 +483,12 @@ void *handleRequest(void* args) {
                     buffer_appendFromString(&thread->request.url, entry.d_name);
 
                     if (entry.d_type == DT_DIR) {
+                        buffer_appendFromString(&thread->dirnameBuffer, entry.d_name); 
+                        buffer_appendFromArray(&thread->dirnameBuffer, "", 1); 
                         ++dirCount;
                     } else if (entry.d_type == DT_REG) {
+                        buffer_appendFromString(&thread->filenameBuffer, entry.d_name); 
+                        buffer_appendFromArray(&thread->filenameBuffer, "", 1); 
                         ++fileCount;
                     }
 
@@ -493,31 +497,30 @@ void *handleRequest(void* args) {
 
                 char* directoryNames[dirCount];
                 char* filenames[fileCount];
-                size_t currentDir = 0;
-                size_t currentFile = 0;
+                size_t currentFile = 1;
+                size_t currentDir = 1;
 
-                rewinddir(dir);
+                directoryNames[0] = thread->dirnameBuffer.data;
+                filenames[0] = thread->filenameBuffer.data;
 
-                readdir_r(dir, &entry, &entryp);
-                while (entryp) {
-                    if (array_equals(entry.d_name, 2, ".", 2) || array_equals(entry.d_name, 3, "..", 3)) {
-                        readdir_r(dir, &entry, &entryp);
-                        continue;
-                    }
-
-                    if (entry.d_type == DT_DIR) {
-                        directoryNames[currentDir] = thread->dirnameBuffer.data + thread->dirnameBuffer.length;
-                        buffer_appendFromString(&thread->dirnameBuffer, entry.d_name); 
-                        buffer_appendFromArray(&thread->dirnameBuffer, "", 1); 
+                char* current = thread->dirnameBuffer.data;
+                char* end = thread->dirnameBuffer.data + thread->dirnameBuffer.length;
+                while (current != end && currentDir < dirCount) {
+                    if (*current == '\0') {
+                        directoryNames[currentDir] = current + 1;
                         ++currentDir;
-                    } else if (entry.d_type == DT_REG) {
-                        filenames[currentFile] = thread->filenameBuffer.data + thread->filenameBuffer.length;
-                        buffer_appendFromString(&thread->filenameBuffer, entry.d_name); 
-                        buffer_appendFromArray(&thread->filenameBuffer, "", 1); 
+                    }
+                    ++current;
+                }
+
+                current = thread->filenameBuffer.data;
+                end = thread->filenameBuffer.data + thread->filenameBuffer.length;
+                while (current != end && currentFile < fileCount) {
+                    if (*current == '\0') {
+                        filenames[currentFile] = current + 1;
                         ++currentFile;
                     }
-
-                    readdir_r(dir, &entry, &entryp);
+                    ++current;
                 }
 
                 qsort(directoryNames, dirCount, sizeof(char *), compareNameList);
