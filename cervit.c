@@ -48,7 +48,6 @@ void exit(int status);
 
 #define REQUEST_CHUNK_SIZE 32768
 
-// TODO(Tarek): Case-insensitive file extension check
 // TODO(Tarek): Response headers
 // TODO(Tarek): Content length for responses
 // TODO(Tarek): HEAD response
@@ -206,6 +205,33 @@ char array_equals(char* array1, size_t length1, char* array2, size_t length2) {
     return 1;
 }
 
+char array_caseEquals(char* array1, size_t length1, char* array2, size_t length2) {
+    if (length1 != length2) {
+        return 0;
+    }
+
+    char toLower = 'a' - 'A';
+
+    for (size_t i = 0; i < length1; ++i) {
+        char c1 = array1[i];
+        char c2 = array2[i];
+
+        if (c1 >= 'A' && c1 <= 'Z') {
+            c1 += toLower;
+        }
+
+        if (c2 >= 'A' && c2 <= 'Z') {
+            c2 += toLower;
+        }
+
+        if (c1 != c2) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 ssize_t array_find(char* array1, size_t length1, char* array2, size_t length2) {
     if (length1 < length2) {
         return -1;
@@ -302,93 +328,94 @@ char *contentTypeHeader(Buffer* filename) {
         return HTTP_CONTENT_TYPE_KEY "application/octet-stream" HTTP_NEWLINE;
     }
 
+    char* extension = filename->data + offset;
     size_t length = filename->length - offset;
 
     /////////////
     // Text
     /////////////
-    if (array_equals(filename->data + offset, length, ".html", 5) || array_equals(filename->data + offset, length, ".htm", 4)) {
+    if (array_caseEquals(extension, length, ".html", 5) || array_caseEquals(extension, length, ".htm", 4)) {
         return HTTP_CONTENT_TYPE_KEY "text/html" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".js", 3)) {
+    if (array_caseEquals(extension, length, ".js", 3)) {
         return HTTP_CONTENT_TYPE_KEY "application/javascript" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".css", 4)) {
+    if (array_caseEquals(extension, length, ".css", 4)) {
         return HTTP_CONTENT_TYPE_KEY "text/css" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".xml", 4)) {
+    if (array_caseEquals(extension, length, ".xml", 4)) {
         return HTTP_CONTENT_TYPE_KEY "text/xml" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".json", 5)) {
+    if (array_caseEquals(extension, length, ".json", 5)) {
         return HTTP_CONTENT_TYPE_KEY "application/json" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".txt", 4)) {
+    if (array_caseEquals(extension, length, ".txt", 4)) {
         return HTTP_CONTENT_TYPE_KEY "text/plain" HTTP_NEWLINE;
     }
 
     /////////////
     // Images
     /////////////
-    if (array_equals(filename->data + offset, length, ".jpeg", 5) || array_equals(filename->data + offset, length, ".jpg", 4)) {
+    if (array_caseEquals(extension, length, ".jpeg", 5) || array_caseEquals(extension, length, ".jpg", 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/jpeg" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".png", 4)) {
+    if (array_caseEquals(extension, length, ".png", 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/png" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".gif", 4)) {
+    if (array_caseEquals(extension, length, ".gif", 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/gif" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".bmp", 4)) {
+    if (array_caseEquals(extension, length, ".bmp", 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/bmp" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".svg", 4)) {
+    if (array_caseEquals(extension, length, ".svg", 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/svg+xml" HTTP_NEWLINE;
     }
 
     /////////////
     // Video
     /////////////
-    if (array_equals(filename->data + offset, length, ".ogv", 4)) {
+    if (array_caseEquals(extension, length, ".ogv", 4)) {
         return HTTP_CONTENT_TYPE_KEY "video/ogg" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".mp4", 4)) {
+    if (array_caseEquals(extension, length, ".mp4", 4)) {
         return HTTP_CONTENT_TYPE_KEY "video/mp4" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".mpg", 4) || array_equals(filename->data + offset, length, ".mpeg", 5)) {
+    if (array_caseEquals(extension, length, ".mpg", 4) || array_caseEquals(extension, length, ".mpeg", 5)) {
         return HTTP_CONTENT_TYPE_KEY "video/mpeg" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".mov", 4)) {
+    if (array_caseEquals(extension, length, ".mov", 4)) {
         return HTTP_CONTENT_TYPE_KEY "video/quicktime" HTTP_NEWLINE;
     }
 
     /////////////
     // Audio
     /////////////
-    if (array_equals(filename->data + offset, length, ".ogg", 4)) {
+    if (array_caseEquals(extension, length, ".ogg", 4)) {
         return HTTP_CONTENT_TYPE_KEY "application/ogg" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".oga", 4)) {
+    if (array_caseEquals(extension, length, ".oga", 4)) {
         return HTTP_CONTENT_TYPE_KEY "audio/ogg" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".mp3", 4)) {
+    if (array_caseEquals(extension, length, ".mp3", 4)) {
         return HTTP_CONTENT_TYPE_KEY "audio/mpeg" HTTP_NEWLINE;
     }
 
-    if (array_equals(filename->data + offset, length, ".wav", 4)) {
+    if (array_caseEquals(extension, length, ".wav", 4)) {
         return HTTP_CONTENT_TYPE_KEY "audio/wav" HTTP_NEWLINE;
     }
 
