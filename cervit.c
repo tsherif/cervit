@@ -48,8 +48,7 @@ void exit(int status);
 
 #define REQUEST_CHUNK_SIZE 32768
 
-// TODO(Tarek): Check error codes for threads, clean up threads on exit
-// TODO(Tarek): More mime types: txt, json, video, audio
+// TODO(Tarek): Case-insensitive file extension check
 // TODO(Tarek): Response headers
 // TODO(Tarek): Content length for responses
 // TODO(Tarek): HEAD response
@@ -305,7 +304,10 @@ char *contentTypeHeader(Buffer* filename) {
 
     size_t length = filename->length - offset;
 
-    if (array_equals(filename->data + offset, length, ".html", 5)) {
+    /////////////
+    // Text
+    /////////////
+    if (array_equals(filename->data + offset, length, ".html", 5) || array_equals(filename->data + offset, length, ".htm", 4)) {
         return HTTP_CONTENT_TYPE_KEY "text/html" HTTP_NEWLINE;
     }
 
@@ -317,6 +319,21 @@ char *contentTypeHeader(Buffer* filename) {
         return HTTP_CONTENT_TYPE_KEY "text/css" HTTP_NEWLINE;
     }
 
+    if (array_equals(filename->data + offset, length, ".xml", 4)) {
+        return HTTP_CONTENT_TYPE_KEY "text/xml" HTTP_NEWLINE;
+    }
+
+    if (array_equals(filename->data + offset, length, ".json", 5)) {
+        return HTTP_CONTENT_TYPE_KEY "application/json" HTTP_NEWLINE;
+    }
+
+    if (array_equals(filename->data + offset, length, ".txt", 4)) {
+        return HTTP_CONTENT_TYPE_KEY "text/plain" HTTP_NEWLINE;
+    }
+
+    /////////////
+    // Images
+    /////////////
     if (array_equals(filename->data + offset, length, ".jpeg", 5) || array_equals(filename->data + offset, length, ".jpg", 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/jpeg" HTTP_NEWLINE;
     }
@@ -327,6 +344,52 @@ char *contentTypeHeader(Buffer* filename) {
 
     if (array_equals(filename->data + offset, length, ".gif", 4)) {
         return HTTP_CONTENT_TYPE_KEY "image/gif" HTTP_NEWLINE;
+    }
+
+    if (array_equals(filename->data + offset, length, ".bmp", 4)) {
+        return HTTP_CONTENT_TYPE_KEY "image/bmp" HTTP_NEWLINE;
+    }
+
+    if (array_equals(filename->data + offset, length, ".svg", 4)) {
+        return HTTP_CONTENT_TYPE_KEY "image/svg+xml" HTTP_NEWLINE;
+    }
+
+    /////////////
+    // Video
+    /////////////
+    if (array_equals(filename->data + offset, length, ".ogv", 4)) {
+        return HTTP_CONTENT_TYPE_KEY "video/ogg" HTTP_NEWLINE;
+    }
+
+    if (array_equals(filename->data + offset, length, ".mp4", 4)) {
+        return HTTP_CONTENT_TYPE_KEY "video/mp4" HTTP_NEWLINE;
+    }
+
+    if (array_equals(filename->data + offset, length, ".mpg", 4) || array_equals(filename->data + offset, length, ".mpeg", 5)) {
+        return HTTP_CONTENT_TYPE_KEY "video/mpeg" HTTP_NEWLINE;
+    }
+
+    if (array_equals(filename->data + offset, length, ".mov", 4)) {
+        return HTTP_CONTENT_TYPE_KEY "video/quicktime" HTTP_NEWLINE;
+    }
+
+    /////////////
+    // Audio
+    /////////////
+    if (array_equals(filename->data + offset, length, ".ogg", 4)) {
+        return HTTP_CONTENT_TYPE_KEY "application/ogg" HTTP_NEWLINE;
+    }
+
+    if (array_equals(filename->data + offset, length, ".oga", 4)) {
+        return HTTP_CONTENT_TYPE_KEY "audio/ogg" HTTP_NEWLINE;
+    }
+
+    if (array_equals(filename->data + offset, length, ".mp3", 4)) {
+        return HTTP_CONTENT_TYPE_KEY "audio/mpeg" HTTP_NEWLINE;
+    }
+
+    if (array_equals(filename->data + offset, length, ".wav", 4)) {
+        return HTTP_CONTENT_TYPE_KEY "audio/wav" HTTP_NEWLINE;
     }
 
     return HTTP_CONTENT_TYPE_KEY "application/octet-stream" HTTP_NEWLINE;
@@ -606,7 +669,13 @@ void *handleRequest(void* args) {
 }
 
 void onClose(void) {
+    close(sock);
+    pthread_mutex_destroy(&currentConnectionLock);
+    pthread_cond_destroy(&currentConnectionWritten);
+    pthread_cond_destroy(&currentConnectionRead);
+
     for (int i = 0; i < numThreads; ++i) {
+        pthread_cancel(threads[i].thread);
         buffer_delete(&threads[i].requestBuffer);
         buffer_delete(&threads[i].responseBuffer);
         buffer_delete(&threads[i].request.method);
@@ -616,7 +685,7 @@ void onClose(void) {
         buffer_delete(&threads[i].filenameBuffer);
         close(threads[i].connection);
     }
-    close(sock);
+
     free(threads);
 }
 
@@ -651,11 +720,17 @@ int main(int argc, char** argv) {
     signal(SIGTSTP, onSignal);
     signal(SIGTERM, onSignal);
 
+    int initErrors = 0;
+    int errorCode = 0;
     threads = malloc(numThreads * sizeof(Thread));
 
     for (int i = 0; i < numThreads; ++i) {
         threads[i].id = i;
-        pthread_create(&threads[i].thread, NULL, handleRequest, &threads[i]);
+        errorCode = pthread_create(&threads[i].thread, NULL, handleRequest, &threads[i]);
+        if (errorCode) {
+            fprintf(stderr, "Failed to create thread. Error code: %d", errorCode);
+            ++initErrors;
+        }
         buffer_init(&threads[i].request.method, 16);
         buffer_init(&threads[i].request.url, 1024);
         buffer_init(&threads[i].requestBuffer, 2048);
@@ -665,9 +740,27 @@ int main(int argc, char** argv) {
         buffer_init(&threads[i].filenameBuffer, 512);
     }
 
-    pthread_mutex_init(&currentConnectionLock, NULL);
-    pthread_cond_init(&currentConnectionWritten, NULL);
-    pthread_cond_init(&currentConnectionRead, NULL);
+    errorCode = pthread_mutex_init(&currentConnectionLock, NULL);
+    if (errorCode) {
+        fprintf(stderr, "Failed to create mutex. Error code: %d", errorCode);
+        ++initErrors;
+    }
+
+    errorCode = pthread_cond_init(&currentConnectionWritten, NULL);
+    if (errorCode) {
+        fprintf(stderr, "Failed to create write condition. Error code: %d", errorCode);
+        ++initErrors;
+    }
+
+    errorCode = pthread_cond_init(&currentConnectionRead, NULL);
+    if (errorCode) {
+        fprintf(stderr, "Failed to create read condition. Error code: %d", errorCode);
+        ++initErrors;
+    }
+
+    if (initErrors) {
+        return 1;
+    }
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == -1) {
