@@ -41,6 +41,7 @@ int atexit(void (*func)(void));
 void exit(int status);
 
 #define HTTP_OK_HEADER "HTTP/1.1 200 OK\r\n"
+#define HTTP_CACHE_HEADERS "Server: cervit/0.1\r\nCache-control: no-cache, no-store, must-revalidate\r\nExpires: 0\r\nPragma: no-cache\r\n"
 #define HTTP_CONTENT_TYPE_KEY "Content-Type: "
 #define HTTP_NEWLINE "\r\n"
 
@@ -48,8 +49,7 @@ void exit(int status);
 
 #define REQUEST_CHUNK_SIZE 32768
 
-// TODO(Tarek): Response headers
-// TODO(Tarek): Content length for responses
+// TODO(Tarek): Content-Length response header
 // TODO(Tarek): HEAD response
 // TODO(Tarek): Not supported response for non-get, non-head requests
 // TODO(Tarek): Check for leaving root dir
@@ -325,7 +325,7 @@ char *contentTypeHeader(Buffer* filename) {
     }
 
     if (offset == 0) {
-        return HTTP_CONTENT_TYPE_KEY "application/octet-stream" HTTP_NEWLINE;
+        return "application/octet-stream";
     }
 
     char* extension = filename->data + offset;
@@ -335,91 +335,91 @@ char *contentTypeHeader(Buffer* filename) {
     // Text
     /////////////
     if (array_caseEquals(extension, length, ".html", 5) || array_caseEquals(extension, length, ".htm", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "text/html" HTTP_NEWLINE;
+        return "text/html";
     }
 
     if (array_caseEquals(extension, length, ".js", 3)) {
-        return HTTP_CONTENT_TYPE_KEY "application/javascript" HTTP_NEWLINE;
+        return "application/javascript";
     }
 
     if (array_caseEquals(extension, length, ".css", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "text/css" HTTP_NEWLINE;
+        return "text/css";
     }
 
     if (array_caseEquals(extension, length, ".xml", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "text/xml" HTTP_NEWLINE;
+        return "text/xml";
     }
 
     if (array_caseEquals(extension, length, ".json", 5)) {
-        return HTTP_CONTENT_TYPE_KEY "application/json" HTTP_NEWLINE;
+        return "application/json";
     }
 
     if (array_caseEquals(extension, length, ".txt", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "text/plain" HTTP_NEWLINE;
+        return "text/plain";
     }
 
     /////////////
     // Images
     /////////////
     if (array_caseEquals(extension, length, ".jpeg", 5) || array_caseEquals(extension, length, ".jpg", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "image/jpeg" HTTP_NEWLINE;
+        return "image/jpeg";
     }
 
     if (array_caseEquals(extension, length, ".png", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "image/png" HTTP_NEWLINE;
+        return "image/png";
     }
 
     if (array_caseEquals(extension, length, ".gif", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "image/gif" HTTP_NEWLINE;
+        return "image/gif";
     }
 
     if (array_caseEquals(extension, length, ".bmp", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "image/bmp" HTTP_NEWLINE;
+        return "image/bmp";
     }
 
     if (array_caseEquals(extension, length, ".svg", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "image/svg+xml" HTTP_NEWLINE;
+        return "image/svg+xml";
     }
 
     /////////////
     // Video
     /////////////
     if (array_caseEquals(extension, length, ".ogv", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "video/ogg" HTTP_NEWLINE;
+        return "video/ogg";
     }
 
     if (array_caseEquals(extension, length, ".mp4", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "video/mp4" HTTP_NEWLINE;
+        return "video/mp4";
     }
 
     if (array_caseEquals(extension, length, ".mpg", 4) || array_caseEquals(extension, length, ".mpeg", 5)) {
-        return HTTP_CONTENT_TYPE_KEY "video/mpeg" HTTP_NEWLINE;
+        return "video/mpeg";
     }
 
     if (array_caseEquals(extension, length, ".mov", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "video/quicktime" HTTP_NEWLINE;
+        return "video/quicktime";
     }
 
     /////////////
     // Audio
     /////////////
     if (array_caseEquals(extension, length, ".ogg", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "application/ogg" HTTP_NEWLINE;
+        return "application/ogg";
     }
 
     if (array_caseEquals(extension, length, ".oga", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "audio/ogg" HTTP_NEWLINE;
+        return "audio/ogg";
     }
 
     if (array_caseEquals(extension, length, ".mp3", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "audio/mpeg" HTTP_NEWLINE;
+        return "audio/mpeg";
     }
 
     if (array_caseEquals(extension, length, ".wav", 4)) {
-        return HTTP_CONTENT_TYPE_KEY "audio/wav" HTTP_NEWLINE;
+        return "audio/wav";
     }
 
-    return HTTP_CONTENT_TYPE_KEY "application/octet-stream" HTTP_NEWLINE;
+    return "application/octet-stream";
 }
 
 // Currently just gets method and URL
@@ -549,7 +549,7 @@ void *handleRequest(void* args) {
                 thread->dirnameBuffer.length = 0;
                 thread->filenameBuffer.length = 0;
                 thread->request.url.length = baseLength;
-                buffer_appendFromString(&thread->dirListingBuffer, HTTP_OK_HEADER "Content-type: text/html" HTTP_NEWLINE HTTP_NEWLINE);
+                buffer_appendFromString(&thread->dirListingBuffer, HTTP_OK_HEADER HTTP_CACHE_HEADERS "Content-Type: text/html" HTTP_NEWLINE HTTP_NEWLINE);
                 buffer_appendFromString(&thread->dirListingBuffer, "<html><body><h1>Directory listing for: ");
                 buffer_appendFromArray(&thread->dirListingBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
                 buffer_appendFromString(&thread->dirListingBuffer, "</h1><ul>\n");
@@ -674,7 +674,10 @@ void *handleRequest(void* args) {
         }
 
         buffer_appendFromArray(&thread->responseBuffer, HTTP_OK_HEADER, string_length(HTTP_OK_HEADER, "\0", 1));
+        buffer_appendFromString(&thread->responseBuffer, HTTP_CACHE_HEADERS);
+        buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_TYPE_KEY);
         buffer_appendFromString(&thread->responseBuffer, contentTypeHeader(&thread->request.url));
+        buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE);
         buffer_appendFromArray(&thread->responseBuffer, HTTP_NEWLINE, string_length(HTTP_NEWLINE, "\0", 4));
 
         buffer_checkAllocation(&thread->responseBuffer, thread->responseBuffer.length + fileInfo.st_size);
