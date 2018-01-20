@@ -50,14 +50,18 @@ void exit(int status);
 #define HTTP_METHOD_HEAD 2
 #define HTTP_METHOD_UNSUPPORTED -1
 
+#define BAD_REQUEST "HTTP/1.1 400 BAD REQUEST\r\nContent-Type: text/html\r\nContent-Length: 59\r\n\r\n<html><body>\n<h1>Invalid HTTP request!</h1>\n</body></html>\n"
 #define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\nContent-Length: 53\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
-#define NOT_SUPPORTED "HTTP/1.1 501 NOT IMPLEMENTED\r\nContent-Type: text/html\r\nContent-Length: 59\r\n\r\n<html><body>\n<h1>Method not supported!</h1>\n</body></html>\n"
+#define TOO_LARGE "HTTP/1.1 431 REQUEST HEADERS TOO LARGE\r\nContent-Type: text/html\r\nContent-Length: 53\r\n\r\n<html><body>\n<h1>Request too large!</h1>\n</body></html>\n"
+#define NOT_SUPPORTED "HTTP/1.1 501 NOT IMPLEMENTED\r\nContent-Type: text/html\r\nContent-Length: 55\r\n\r\n<html><body>\n<h1>Method not supported!</h1>\n</body></html>\n"
 
 #define REQUEST_CHUNK_SIZE 32768
+#define REQUEST_MAX_SIZE (REQUEST_CHUNK_SIZE * 4)
 #define STATIC_STRING_LENGTH(string) (sizeof(string) - 1)
 
-// TODO(Tarek): Check for leaving root dir
-// TODO(Tarek): Handle junk data
+// TODO(Tarek): Validation during parsing
+// TODO(Tarek): Error checking on malloc, socket_set_attr, etc.
+// TODO(Tarek): Normalize URI
 
 typedef struct {
     char* data;
@@ -520,7 +524,6 @@ void *handleRequest(void* args) {
     struct stat fileInfo;
     int returnVal = 0;
     char requestChunk[REQUEST_CHUNK_SIZE];
-    int received = 0;
     int method = 0;
 
     while(1) {
@@ -538,27 +541,37 @@ void *handleRequest(void* args) {
         pthread_mutex_unlock(&currentConnectionLock);
         pthread_cond_signal(&currentConnectionRead);
 
+        char validRequest = 0;
         while(1) {
-            received = recv(thread->connection, requestChunk, REQUEST_CHUNK_SIZE, 0);
+            int received = recv(thread->connection, requestChunk, REQUEST_CHUNK_SIZE, 0);
 
-            if (received < 1) {
+            if (received == -1) {
+                perror("Failed to receive data");
                 break;
             }
 
             // In case it's split between chunks.
             int index = thread->requestBuffer.length > 3 ? thread->requestBuffer.length - 3 : 0;
             buffer_appendFromArray(&thread->requestBuffer, requestChunk, received);
+
             if (array_find(thread->requestBuffer.data + index, thread->requestBuffer.length - index, "\r\n\r\n", 4) != -1) {
+                validRequest = 1;
+                break;
+            } else if (received < REQUEST_CHUNK_SIZE) {
+                // Request ended without header terminator
+                write(thread->connection, BAD_REQUEST, STATIC_STRING_LENGTH(BAD_REQUEST));  
+                break;
+            } else if (thread->requestBuffer.length > REQUEST_MAX_SIZE) {
+                write(thread->connection, TOO_LARGE, STATIC_STRING_LENGTH(TOO_LARGE));  
                 break;
             }
         }
 
-        if (received == -1) {
-            perror("Failed to receive data");
+        if (!validRequest) {
             close(thread->connection);
             continue;
         }
-        
+
         parseRequest(thread->requestBuffer.data, &thread->request);
         method = methodCode(&thread->request.method);
 
