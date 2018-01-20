@@ -70,7 +70,6 @@ typedef struct {
     Request request;
     Buffer requestBuffer;
     Buffer responseBuffer;
-    Buffer dirListingBuffer;
     Buffer dirnameBuffer;
     Buffer filenameBuffer;
     int id;
@@ -505,7 +504,7 @@ void *handleRequest(void* args) {
             }
 
             // In case it's split between chunks.
-            int index = thread->responseBuffer.length > 3 ? thread->responseBuffer.length - 3 : 0;
+            int index = thread->requestBuffer.length > 3 ? thread->requestBuffer.length - 3 : 0;
             buffer_appendFromArray(&thread->requestBuffer, requestChunk, received);
             if (array_find(thread->requestBuffer.data + index, thread->requestBuffer.length - index, "\r\n\r\n", 4) != -1) {
                 break;
@@ -545,14 +544,13 @@ void *handleRequest(void* args) {
 
             // Otherwise send directory listing.
             if (returnVal == -1) {
-                thread->dirListingBuffer.length = 0;
                 thread->dirnameBuffer.length = 0;
                 thread->filenameBuffer.length = 0;
                 thread->request.url.length = baseLength;
-                buffer_appendFromString(&thread->dirListingBuffer, HTTP_OK_HEADER HTTP_CACHE_HEADERS "Content-Type: text/html" HTTP_NEWLINE HTTP_NEWLINE);
-                buffer_appendFromString(&thread->dirListingBuffer, "<html><body><h1>Directory listing for: ");
-                buffer_appendFromArray(&thread->dirListingBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
-                buffer_appendFromString(&thread->dirListingBuffer, "</h1><ul>\n");
+                buffer_appendFromString(&thread->responseBuffer, HTTP_OK_HEADER HTTP_CACHE_HEADERS "Content-Type: text/html" HTTP_NEWLINE HTTP_NEWLINE);
+                buffer_appendFromString(&thread->responseBuffer, "<html><body><h1>Directory listing for: ");
+                buffer_appendFromArray(&thread->responseBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                buffer_appendFromString(&thread->responseBuffer, "</h1><ul>\n");
 
                 DIR *dir = buffer_openDir(&thread->request.url);
 
@@ -628,25 +626,25 @@ void *handleRequest(void* args) {
                 thread->request.url.length = baseLength;
                 
                 for (size_t i = 0; i < dirCount; ++i) {
-                    buffer_appendFromString(&thread->dirListingBuffer, "<li><a href=\"");
-                    buffer_appendFromArray(&thread->dirListingBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
-                    buffer_appendFromString(&thread->dirListingBuffer, directoryNames[i]);
-                    buffer_appendFromString(&thread->dirListingBuffer, "/\">");
-                    buffer_appendFromString(&thread->dirListingBuffer, directoryNames[i]);
-                    buffer_appendFromString(&thread->dirListingBuffer, "/</a></li>");
+                    buffer_appendFromString(&thread->responseBuffer, "<li><a href=\"");
+                    buffer_appendFromArray(&thread->responseBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                    buffer_appendFromString(&thread->responseBuffer, directoryNames[i]);
+                    buffer_appendFromString(&thread->responseBuffer, "/\">");
+                    buffer_appendFromString(&thread->responseBuffer, directoryNames[i]);
+                    buffer_appendFromString(&thread->responseBuffer, "/</a></li>");
                 }
 
                 for (size_t i = 0; i < fileCount; ++i) {
-                    buffer_appendFromString(&thread->dirListingBuffer, "<li><a href=\"");
-                    buffer_appendFromArray(&thread->dirListingBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
-                    buffer_appendFromString(&thread->dirListingBuffer, filenames[i]);
-                    buffer_appendFromString(&thread->dirListingBuffer, "\">");
-                    buffer_appendFromString(&thread->dirListingBuffer, filenames[i]);
-                    buffer_appendFromString(&thread->dirListingBuffer, "</a></li>");
+                    buffer_appendFromString(&thread->responseBuffer, "<li><a href=\"");
+                    buffer_appendFromArray(&thread->responseBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                    buffer_appendFromString(&thread->responseBuffer, filenames[i]);
+                    buffer_appendFromString(&thread->responseBuffer, "\">");
+                    buffer_appendFromString(&thread->responseBuffer, filenames[i]);
+                    buffer_appendFromString(&thread->responseBuffer, "</a></li>");
                 }
-                buffer_appendFromString(&thread->dirListingBuffer, "</ul></body></html>" HTTP_NEWLINE HTTP_NEWLINE);
+                buffer_appendFromString(&thread->responseBuffer, "</ul></body></html>" HTTP_NEWLINE HTTP_NEWLINE);
 
-                write(thread->connection, thread->dirListingBuffer.data, thread->dirListingBuffer.length);  
+                write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);  
                 close(thread->connection);
                 closedir(dir);
                 continue;
@@ -710,7 +708,6 @@ void onClose(void) {
         buffer_delete(&threads[i].responseBuffer);
         buffer_delete(&threads[i].request.method);
         buffer_delete(&threads[i].request.url);
-        buffer_delete(&threads[i].dirListingBuffer);
         buffer_delete(&threads[i].dirnameBuffer);
         buffer_delete(&threads[i].filenameBuffer);
         close(threads[i].connection);
@@ -765,7 +762,6 @@ int main(int argc, char** argv) {
         buffer_init(&threads[i].request.url, 1024);
         buffer_init(&threads[i].requestBuffer, 2048);
         buffer_init(&threads[i].responseBuffer, 1024);
-        buffer_init(&threads[i].dirListingBuffer, 512);
         buffer_init(&threads[i].dirnameBuffer, 512);
         buffer_init(&threads[i].filenameBuffer, 512);
     }
