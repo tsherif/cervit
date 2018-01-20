@@ -46,12 +46,16 @@ void exit(int status);
 #define HTTP_CONTENT_LENGTH_KEY "Content-Length: "
 #define HTTP_NEWLINE "\r\n"
 
+#define HTTP_METHOD_GET 1
+#define HTTP_METHOD_HEAD 2
+#define HTTP_METHOD_UNSUPPORTED -1
+
 #define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\nContent-Length: 53\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
+#define NOT_SUPPORTED "HTTP/1.1 501 NOT IMPLEMENTED\r\nContent-Type: text/html\r\nContent-Length: 59\r\n\r\n<html><body>\n<h1>Method not supported!</h1>\n</body></html>\n"
 
 #define REQUEST_CHUNK_SIZE 32768
+#define STATIC_STRING_LENGTH(string) (sizeof(string) - 1)
 
-// TODO(Tarek): HEAD response
-// TODO(Tarek): Not supported response for non-get, non-head requests
 // TODO(Tarek): Check for leaving root dir
 // TODO(Tarek): Handle junk data
 
@@ -446,6 +450,18 @@ char *contentTypeHeader(Buffer* filename) {
     return "application/octet-stream";
 }
 
+int methodCode(Buffer* buffer) {
+    if (array_caseEquals(buffer->data, buffer->length, "GET", 3)) {
+        return HTTP_METHOD_GET;
+    }
+
+    if (array_caseEquals(buffer->data, buffer->length, "HEAD", 4)) {
+        return HTTP_METHOD_HEAD;
+    }
+
+    return HTTP_METHOD_UNSUPPORTED;
+}
+
 // Currently just gets method and URL
 void parseRequest(char *requestString, Request* req) {
     req->method.length = 0;
@@ -505,6 +521,7 @@ void *handleRequest(void* args) {
     int returnVal = 0;
     char requestChunk[REQUEST_CHUNK_SIZE];
     int received = 0;
+    int method = 0;
 
     while(1) {
         thread->requestBuffer.length = 0;
@@ -543,14 +560,21 @@ void *handleRequest(void* args) {
         }
         
         parseRequest(thread->requestBuffer.data, &thread->request);
+        method = methodCode(&thread->request.method);
 
-        printf("URL %.*s handled by thread %d\n", (int) thread->request.url.length, thread->request.url.data, thread->id);
+        if (method == HTTP_METHOD_UNSUPPORTED) {
+            write(thread->connection, NOT_SUPPORTED, STATIC_STRING_LENGTH(NOT_SUPPORTED));  
+            close(thread->connection);
+            continue;
+        }
+
+        printf("%.*s %.*s handled by thread %d\n", (int) thread->request.method.length, thread->request.method.data, (int) thread->request.url.length - 1, thread->request.url.data + 1, thread->id);
 
         returnVal = buffer_statFile(&thread->request.url, &fileInfo);
 
         if (returnVal == -1) {
             perror("Failed to stat url");
-            write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            write(thread->connection, NOT_FOUND, STATIC_STRING_LENGTH(NOT_FOUND));  
             close(thread->connection);
             continue;
         }
@@ -581,7 +605,7 @@ void *handleRequest(void* args) {
 
                 if (!dir) {
                     perror("Failed to open directory");
-                    write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+                    write(thread->connection, NOT_FOUND, STATIC_STRING_LENGTH(NOT_FOUND));  
                     close(thread->connection);
                     continue;
                 }
@@ -674,7 +698,9 @@ void *handleRequest(void* args) {
                 buffer_appendFromSizeT(&thread->responseBuffer, thread->dirListingBuffer.length);
                 buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE HTTP_NEWLINE);
 
-                buffer_appendFromArray(&thread->responseBuffer, thread->dirListingBuffer.data, thread->dirListingBuffer.length);
+                if (method == HTTP_METHOD_GET) {
+                    buffer_appendFromArray(&thread->responseBuffer, thread->dirListingBuffer.data, thread->dirListingBuffer.length);
+                }
 
                 write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);  
                 close(thread->connection);
@@ -688,7 +714,7 @@ void *handleRequest(void* args) {
 
         if (fd == -1) {
             perror("Failed to open file");
-            write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            write(thread->connection, NOT_FOUND, STATIC_STRING_LENGTH(NOT_FOUND));  
             close(thread->connection);
             continue; 
         }
@@ -697,7 +723,7 @@ void *handleRequest(void* args) {
 
         if (returnVal == -1) {
             perror("Failed to stat file");
-            write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
+            write(thread->connection, NOT_FOUND, STATIC_STRING_LENGTH(NOT_FOUND));  
             close(thread->connection);
             close(fd);
             continue;
@@ -712,14 +738,16 @@ void *handleRequest(void* args) {
         buffer_appendFromSizeT(&thread->responseBuffer, fileInfo.st_size);
         buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE HTTP_NEWLINE);
 
-        returnVal = buffer_appendFromFile(&thread->responseBuffer, fd, fileInfo.st_size);
+        if (method == HTTP_METHOD_GET) {
+            returnVal = buffer_appendFromFile(&thread->responseBuffer, fd, fileInfo.st_size);
 
-        if (returnVal == -1) {
-            perror("Failed to read file");
-            write(thread->connection, NOT_FOUND, string_length(NOT_FOUND, "\0", 1));  
-            close(thread->connection);
-            close(fd);
-            continue;
+            if (returnVal == -1) {
+                perror("Failed to read file");
+                write(thread->connection, NOT_FOUND, STATIC_STRING_LENGTH(NOT_FOUND));  
+                close(thread->connection);
+                close(fd);
+                continue;
+            }
         }
 
         write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
