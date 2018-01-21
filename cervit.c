@@ -58,8 +58,8 @@ void exit(int status);
 #define METHOD_NOT_SUPPORTED "HTTP/1.1 501 NOT IMPLEMENTED\r\nContent-Type: text/html\r\nContent-Length: 55\r\n\r\n<html><body>\n<h1>Method not supported!</h1>\n</body></html>\n"
 #define VERSION_NOT_SUPPORTED "HTTP/1.1 505 VERSION NOT SUPPORTED\r\nContent-Type: text/html\r\nContent-Length: 70\r\n\r\n<html><body>\n<h1>HTTP version must be 1.1 or 1.0!</h1>\n</body></html>\n"
 
-#define REQUEST_CHUNK_SIZE 32768
-#define REQUEST_MAX_SIZE (REQUEST_CHUNK_SIZE * 4)
+#define TRANSFER_CHUNK_SIZE 32768
+#define REQUEST_MAX_SIZE (TRANSFER_CHUNK_SIZE * 4)
 #define STATIC_STRING_LENGTH(string) (sizeof(string) - 1)
 
 // TODO(Tarek): Can I write from file directly to socket?
@@ -378,15 +378,6 @@ DIR* buffer_openDir(Buffer* buffer) {
     return opendir(buffer->data);
 }
 
-ssize_t buffer_appendFromFile(Buffer* buffer, int fd, size_t length) {
-    buffer_checkAllocation(buffer, buffer->length + length);
-    ssize_t numRead = read(fd, buffer->data + buffer->length, length);
-    if (numRead > 0) {
-        buffer->length += numRead;
-    }
-    return numRead;
-} 
-
 char *contentTypeHeader(Buffer* filename) {
     size_t offset = filename->length - 1;
     
@@ -634,7 +625,7 @@ void *handleRequest(void* args) {
 
     struct stat fileInfo;
     int returnVal = 0;
-    char requestChunk[REQUEST_CHUNK_SIZE];
+    char requestChunk[TRANSFER_CHUNK_SIZE];
     int method = 0;
 
     while(1) {
@@ -654,7 +645,7 @@ void *handleRequest(void* args) {
 
         char validRequest = 0;
         while(1) {
-            int received = recv(thread->connection, requestChunk, REQUEST_CHUNK_SIZE, 0);
+            int received = recv(thread->connection, requestChunk, TRANSFER_CHUNK_SIZE, 0);
 
             if (received == -1) {
                 perror("Failed to receive data");
@@ -668,7 +659,7 @@ void *handleRequest(void* args) {
             if (array_find(thread->requestBuffer.data + index, thread->requestBuffer.length - index, "\r\n\r\n", 4) != -1) {
                 validRequest = 1;
                 break;
-            } else if (received < REQUEST_CHUNK_SIZE) {
+            } else if (received < TRANSFER_CHUNK_SIZE) {
                 // Request ended without header terminator
                 write(thread->connection, BAD_REQUEST, STATIC_STRING_LENGTH(BAD_REQUEST));  
                 break;
@@ -867,28 +858,41 @@ void *handleRequest(void* args) {
             continue;
         }
 
+        size_t fileSize = fileInfo.st_size;
+
         buffer_appendFromArray(&thread->responseBuffer, HTTP_OK_HEADER, STATIC_STRING_LENGTH(HTTP_OK_HEADER));
         buffer_appendFromString(&thread->responseBuffer, HTTP_CACHE_HEADERS);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_TYPE_KEY);
         buffer_appendFromString(&thread->responseBuffer, contentTypeHeader(&thread->request.url));
         buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_LENGTH_KEY);
-        buffer_appendFromSizeT(&thread->responseBuffer, fileInfo.st_size);
+        buffer_appendFromSizeT(&thread->responseBuffer, fileSize);
         buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE HTTP_NEWLINE);
 
-        if (method == HTTP_METHOD_GET) {
-            returnVal = buffer_appendFromFile(&thread->responseBuffer, fd, fileInfo.st_size);
-
-            if (returnVal == -1) {
-                perror("Failed to read file");
-                write(thread->connection, NOT_FOUND, STATIC_STRING_LENGTH(NOT_FOUND));  
-                close(thread->connection);
-                close(fd);
-                continue;
-            }
-        }
-
         write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
+
+        if (method == HTTP_METHOD_GET) {
+            char fileChunk[TRANSFER_CHUNK_SIZE];
+
+            size_t i = 0;
+            while (i < fileSize) {
+                size_t length = TRANSFER_CHUNK_SIZE;
+
+                if (i + length > fileSize) {
+                    length = fileSize - i;
+                }
+
+                ssize_t numRead = read(fd, fileChunk, length);
+
+                if (numRead > 0) {
+                    i += numRead;
+                } else {
+                    break;
+                }
+
+                write(thread->connection, fileChunk, length);
+            }
+        } 
 
         close(thread->connection);
         close(fd);
