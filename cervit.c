@@ -40,6 +40,8 @@ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 int atexit(void (*func)(void));
 void exit(int status);
 
+#define HTTP_1_1_VERSION "HTTP/1.1"
+#define HTTP_1_0_VERSION "HTTP/1.0"
 #define HTTP_OK_HEADER "HTTP/1.1 200 OK\r\n"
 #define HTTP_CACHE_HEADERS "Server: cervit/0.1\r\nCache-control: no-cache, no-store, must-revalidate\r\nExpires: 0\r\nPragma: no-cache\r\n"
 #define HTTP_CONTENT_TYPE_KEY "Content-Type: "
@@ -53,13 +55,14 @@ void exit(int status);
 #define BAD_REQUEST "HTTP/1.1 400 BAD REQUEST\r\nContent-Type: text/html\r\nContent-Length: 59\r\n\r\n<html><body>\n<h1>Invalid HTTP request!</h1>\n</body></html>\n"
 #define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\nContent-Length: 53\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
 #define TOO_LARGE "HTTP/1.1 431 REQUEST HEADERS TOO LARGE\r\nContent-Type: text/html\r\nContent-Length: 53\r\n\r\n<html><body>\n<h1>Request too large!</h1>\n</body></html>\n"
-#define NOT_SUPPORTED "HTTP/1.1 501 NOT IMPLEMENTED\r\nContent-Type: text/html\r\nContent-Length: 55\r\n\r\n<html><body>\n<h1>Method not supported!</h1>\n</body></html>\n"
+#define METHOD_NOT_SUPPORTED "HTTP/1.1 501 NOT IMPLEMENTED\r\nContent-Type: text/html\r\nContent-Length: 55\r\n\r\n<html><body>\n<h1>Method not supported!</h1>\n</body></html>\n"
+#define VERSION_NOT_SUPPORTED "HTTP/1.1 505 VERSION NOT SUPPORTED\r\nContent-Type: text/html\r\nContent-Length: 70\r\n\r\n<html><body>\n<h1>HTTP version must be 1.1 or 1.0!</h1>\n</body></html>\n"
 
 #define REQUEST_CHUNK_SIZE 32768
 #define REQUEST_MAX_SIZE (REQUEST_CHUNK_SIZE * 4)
 #define STATIC_STRING_LENGTH(string) (sizeof(string) - 1)
 
-// TODO(Tarek): Validation during parsing
+// TODO(Tarek): Allow leading newlines in request
 // TODO(Tarek): Error checking on malloc, socket_set_attr, etc.
 // TODO(Tarek): Normalize URI
 
@@ -72,6 +75,7 @@ typedef struct {
 typedef struct {
     Buffer method;
     Buffer url;
+    Buffer version;
 } Request;
 
 typedef struct {
@@ -102,37 +106,12 @@ pthread_cond_t currentConnectionRead;
 char currentConnectionWriteDone;
 char currentConnectionReadDone;
 
-char* string_skipSpace(char* string) {
-    while (1) {
-        char c = *string;
-
-        if (c != ' ' && c != '\t') {
-            break;
-        }
-
-        if (c == '\0') {
-            break;
-        }
-
-        ++string;
-    }
-
-    return string;
-}
-
-size_t string_length(const char* string, char* terminators, size_t count) {
+size_t string_length(const char* string) {
     size_t length = 0;
-    while (1) {
-        char c = string[length];
-        for (size_t i = 0; i < count; ++i) {
-            if (c == terminators[i]){
-                goto done;
-            }
-        }
+    while (string[length] != '\0') {
         ++length;
     }
 
-    done:
     return length;
 }
 
@@ -184,7 +163,7 @@ char string_parseURIHexCode(const char* string) {
 }
 
 unsigned short string_toUshort(const char* string) {
-    ssize_t i = string_length(string, "\0", 1) - 1;
+    ssize_t i = string_length(string) - 1;
     int multiplier = 1;
     unsigned short result = 0;
     while (i >= 0) {
@@ -256,6 +235,36 @@ ssize_t array_find(char* array1, size_t length1, char* array2, size_t length2) {
     return -1;
 }
 
+size_t array_skipSpace(char* array, size_t length) {
+    size_t i = 0;
+    while (i < length) {
+        char c = array[i];
+
+        if (c != ' ' && c != '\t') {
+            break;
+        }
+
+        ++i;
+    }
+
+    return i;
+}
+
+size_t array_findFromByteSet(const char* array, size_t length, char* byteSet, size_t count) {
+    size_t i = 0;
+    while (i < length) {
+        char c = array[i];
+        for (size_t j = 0; j < count; ++j) {
+            if (c == byteSet[j]){
+                return i;
+            }
+        }
+        ++i;
+    }
+
+    return length;
+}
+
 void buffer_init(Buffer* buffer, size_t size) {
     buffer->data = malloc(size);
     buffer->length = 0;
@@ -285,7 +294,7 @@ void buffer_appendFromArray(Buffer* buffer, const char* array, size_t length) {
 }
 
 void buffer_appendFromString(Buffer* buffer, const char* string) {
-    buffer_appendFromArray(buffer, string, string_length(string, "\0", 1));
+    buffer_appendFromArray(buffer, string, string_length(string));
 }
 
 void buffer_appendFromSizeT(Buffer* buffer, size_t n) {
@@ -467,37 +476,102 @@ int methodCode(Buffer* buffer) {
 }
 
 // Currently just gets method and URL
-void parseRequest(char *requestString, Request* req) {
-    req->method.length = 0;
-    req->url.length = 0;
+int parseRequest(const Buffer* requestBuffer, Request* request) {
+    request->method.length = 0;
+    request->url.length = 0;
+    request->version.length = 0;
+
+    char* requestString = requestBuffer->data;
+    size_t requestStringLength = requestBuffer->length;
 
     // Get method
-    requestString = string_skipSpace(requestString);
-    size_t length = string_length(requestString, " \t", 2);
-    buffer_appendFromArray(&req->method, requestString, length);
-    requestString += length;
+    size_t index = array_skipSpace(requestString, requestStringLength);
+    if (index == requestStringLength) {
+        return -1;
+    }
+    requestString += index;
+    requestStringLength -= index;
+
+
+    index = array_findFromByteSet(requestString, requestStringLength, " \t", 2);
+    
+    if (index == requestStringLength) {
+        return -1;
+    }
+    buffer_appendFromArray(&request->method, requestString, index);
+    requestString += index;
+    requestStringLength -= index;
+
 
     // Get URL
-    buffer_appendFromArray(&req->url, ".", 1);
+    buffer_appendFromArray(&request->url, ".", 1);
 
-    requestString = string_skipSpace(requestString);
-    length = string_length(requestString, "%?# \t", 4);
-    buffer_appendFromArray(&req->url, requestString, length);
-    requestString += length;
-    
+    index = array_skipSpace(requestString, requestStringLength);
+    if (index == requestStringLength) {
+        return -1;
+    }
+    requestString += index;
+    requestStringLength -= index;
+
+    index = array_findFromByteSet(requestString, requestStringLength, "%?# \t", 4);
+    if (index == requestStringLength) {
+        return -1;
+    }
+    buffer_appendFromArray(&request->url, requestString, index);
+    requestString += index;
+    requestStringLength -= index;
+
     while (*requestString == '%') {
-        char c = string_parseURIHexCode(requestString + 1);
-        if (c > 0) {
-            buffer_appendFromArray(&req->url, &c, 1);
-            requestString += 3;
-        } else {
-            ++requestString;
+        if (requestStringLength < 3) {
+            return -1;
         }
 
-        length = string_length(requestString, "%?# \t", 4);
-        buffer_appendFromArray(&req->url, requestString, length);
-        requestString += length;
+        char c = string_parseURIHexCode(requestString + 1);
+        if (c > 0) {
+            buffer_appendFromArray(&request->url, &c, 1);
+            requestString += 3;
+            requestStringLength -= 3;
+        } else {
+            return -1;
+        }
+
+        index = array_findFromByteSet(requestString, requestStringLength, "%?# \t", 4);
+        if (index == requestStringLength) {
+            return -1;
+        }
+        buffer_appendFromArray(&request->url, requestString, index);
+        requestString += index;
+        requestStringLength -= index;
     }
+
+    // HTTP version string
+    index = array_skipSpace(requestString, requestStringLength);
+    if (index == requestStringLength) {
+        return -1;
+    }
+    requestString += index;
+    requestStringLength -= index;
+
+    index = array_findFromByteSet(requestString, requestStringLength, " \t\r\n", 4);
+    if (index == requestStringLength) {
+        return -1;
+    }
+    buffer_appendFromArray(&request->version, requestString, index);
+    requestString += index;
+    requestStringLength -= index;
+
+    index = array_skipSpace(requestString, requestStringLength);
+    if (index == requestStringLength) {
+        return -1;
+    }
+    requestString += index;
+    requestStringLength -= index;
+
+    if (requestStringLength < STATIC_STRING_LENGTH(HTTP_NEWLINE) || !array_equals(requestString, STATIC_STRING_LENGTH(HTTP_NEWLINE), HTTP_NEWLINE, STATIC_STRING_LENGTH(HTTP_NEWLINE))) {
+        return -1;
+    }
+
+    return 0;
 }
 
 void sortNameList(char** list, size_t length) {
@@ -572,11 +646,25 @@ void *handleRequest(void* args) {
             continue;
         }
 
-        parseRequest(thread->requestBuffer.data, &thread->request);
+        if (parseRequest(&thread->requestBuffer, &thread->request) == -1) {
+            write(thread->connection, BAD_REQUEST, STATIC_STRING_LENGTH(BAD_REQUEST)); 
+            close(thread->connection);
+            continue;
+        }
+
         method = methodCode(&thread->request.method);
 
         if (method == HTTP_METHOD_UNSUPPORTED) {
-            write(thread->connection, NOT_SUPPORTED, STATIC_STRING_LENGTH(NOT_SUPPORTED));  
+            write(thread->connection, METHOD_NOT_SUPPORTED, STATIC_STRING_LENGTH(METHOD_NOT_SUPPORTED));  
+            close(thread->connection);
+            continue;
+        }
+
+        if (
+            !array_caseEquals(thread->request.version.data, thread->request.version.length, HTTP_1_1_VERSION, STATIC_STRING_LENGTH(HTTP_1_1_VERSION)) &&
+            !array_caseEquals(thread->request.version.data, thread->request.version.length, HTTP_1_0_VERSION, STATIC_STRING_LENGTH(HTTP_1_0_VERSION))
+        ) {
+            write(thread->connection, VERSION_NOT_SUPPORTED, STATIC_STRING_LENGTH(VERSION_NOT_SUPPORTED));  
             close(thread->connection);
             continue;
         }
@@ -742,7 +830,7 @@ void *handleRequest(void* args) {
             continue;
         }
 
-        buffer_appendFromArray(&thread->responseBuffer, HTTP_OK_HEADER, string_length(HTTP_OK_HEADER, "\0", 1));
+        buffer_appendFromArray(&thread->responseBuffer, HTTP_OK_HEADER, STATIC_STRING_LENGTH(HTTP_OK_HEADER));
         buffer_appendFromString(&thread->responseBuffer, HTTP_CACHE_HEADERS);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_TYPE_KEY);
         buffer_appendFromString(&thread->responseBuffer, contentTypeHeader(&thread->request.url));
@@ -782,6 +870,7 @@ void onClose(void) {
         buffer_delete(&threads[i].responseBuffer);
         buffer_delete(&threads[i].request.method);
         buffer_delete(&threads[i].request.url);
+        buffer_delete(&threads[i].request.version);
         buffer_delete(&threads[i].dirListingBuffer);
         buffer_delete(&threads[i].dirnameBuffer);
         buffer_delete(&threads[i].filenameBuffer);
@@ -834,6 +923,7 @@ int main(int argc, char** argv) {
         }
         buffer_init(&threads[i].request.method, 16);
         buffer_init(&threads[i].request.url, 1024);
+        buffer_init(&threads[i].request.version, 16);
         buffer_init(&threads[i].requestBuffer, 2048);
         buffer_init(&threads[i].responseBuffer, 1024);
         buffer_init(&threads[i].dirListingBuffer, 512);
