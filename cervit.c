@@ -62,7 +62,6 @@ void exit(int status);
 #define REQUEST_MAX_SIZE (REQUEST_CHUNK_SIZE * 4)
 #define STATIC_STRING_LENGTH(string) (sizeof(string) - 1)
 
-// TODO(Tarek): Allow leading newlines in request
 // TODO(Tarek): Error checking on malloc, socket_set_attr, etc.
 // TODO(Tarek): Normalize URI
 
@@ -245,6 +244,19 @@ size_t array_skipSpace(char* array, size_t length) {
         }
 
         ++i;
+    }
+
+    return i;
+}
+
+size_t array_skipHttpNewlines(char* array, size_t length) {
+    size_t i = 0;
+    while (i < length - 1) {
+        if (array[i] == '\r' && array[i + 1] == '\n') {
+            i += 2;
+        } else {
+            break;
+        }
     }
 
     return i;
@@ -484,8 +496,16 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
     char* requestString = requestBuffer->data;
     size_t requestStringLength = requestBuffer->length;
 
+    // Skip leading newlines
+    size_t index = array_skipHttpNewlines(requestString, requestStringLength);
+    if (index == requestStringLength) {
+        return -1;
+    }
+    requestString += index;
+    requestStringLength -= index;
+
     // Get method
-    size_t index = array_skipSpace(requestString, requestStringLength);
+    index = array_skipSpace(requestString, requestStringLength);
     if (index == requestStringLength) {
         return -1;
     }
