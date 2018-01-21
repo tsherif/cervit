@@ -62,7 +62,7 @@ void exit(int status);
 #define REQUEST_MAX_SIZE (REQUEST_CHUNK_SIZE * 4)
 #define STATIC_STRING_LENGTH(string) (sizeof(string) - 1)
 
-// TODO(Tarek): Error checking on malloc, socket_set_attr, etc.
+// TODO(Tarek): Can I write from file directly to socket?
 // TODO(Tarek): Normalize URI
 
 typedef struct {
@@ -280,10 +280,19 @@ size_t array_findFromByteSet(const char* array, size_t length, char* byteSet, si
 void buffer_init(Buffer* buffer, size_t size) {
     buffer->data = malloc(size);
     buffer->length = 0;
+
+    if (!buffer->data) {
+        fprintf(stderr, "buffer_init: Out of memory\n");
+        exit(1);
+    }
+
     buffer->size = size;
 }
 
 void buffer_delete(Buffer* buffer) {
+    if (buffer->data == 0) {
+        return;
+    }
     free(buffer->data);
     buffer->data = 0;
     buffer->length = 0;
@@ -292,10 +301,18 @@ void buffer_delete(Buffer* buffer) {
 
 void buffer_checkAllocation(Buffer* buffer, size_t requestedSize) {
     if (requestedSize > buffer->size) {
-        while (buffer->size < requestedSize) {
-            buffer->size <<= 1;
+        size_t newSize = buffer->size;
+        char* newData;
+        while (newSize < requestedSize) {
+            newSize <<= 1;
         }
-        buffer->data = realloc(buffer->data, buffer->size);
+        newData = realloc(buffer->data, newSize);
+        if (!newData) {
+            fprintf(stderr, "buffer_checkAllocation: Out of memory\n");
+            exit(1);
+        }
+        buffer->data = newData;
+        buffer->size = newSize;
     }
 }
 
@@ -879,10 +896,9 @@ void *handleRequest(void* args) {
 }
 
 void onClose(void) {
-    close(sock);
-    pthread_mutex_destroy(&currentConnectionLock);
-    pthread_cond_destroy(&currentConnectionWritten);
-    pthread_cond_destroy(&currentConnectionRead);
+    if (!threads) {
+        return;
+    }
 
     for (int i = 0; i < numThreads; ++i) {
         pthread_cancel(threads[i].thread);
@@ -896,8 +912,13 @@ void onClose(void) {
         buffer_delete(&threads[i].filenameBuffer);
         close(threads[i].connection);
     }
-
     free(threads);
+
+    pthread_mutex_destroy(&currentConnectionLock);
+    pthread_cond_destroy(&currentConnectionWritten);
+    pthread_cond_destroy(&currentConnectionRead);
+
+    close(sock);
 }
 
 void onSignal(int sig) {
@@ -930,16 +951,20 @@ int main(int argc, char** argv) {
     signal(SIGTSTP, onSignal);
     signal(SIGTERM, onSignal);
 
-    int initErrors = 0;
     int errorCode = 0;
     threads = malloc(numThreads * sizeof(Thread));
+
+    if (!threads) {
+        fprintf(stderr, "Failed to allocate thread array\n");
+        return 1;
+    }
 
     for (int i = 0; i < numThreads; ++i) {
         threads[i].id = i;
         errorCode = pthread_create(&threads[i].thread, NULL, handleRequest, &threads[i]);
         if (errorCode) {
             fprintf(stderr, "Failed to create thread. Error code: %d", errorCode);
-            ++initErrors;
+            return 1;
         }
         buffer_init(&threads[i].request.method, 16);
         buffer_init(&threads[i].request.url, 1024);
@@ -954,22 +979,18 @@ int main(int argc, char** argv) {
     errorCode = pthread_mutex_init(&currentConnectionLock, NULL);
     if (errorCode) {
         fprintf(stderr, "Failed to create mutex. Error code: %d", errorCode);
-        ++initErrors;
+        return 1;
     }
 
     errorCode = pthread_cond_init(&currentConnectionWritten, NULL);
     if (errorCode) {
         fprintf(stderr, "Failed to create write condition. Error code: %d", errorCode);
-        ++initErrors;
+        return 1;
     }
 
     errorCode = pthread_cond_init(&currentConnectionRead, NULL);
     if (errorCode) {
         fprintf(stderr, "Failed to create read condition. Error code: %d", errorCode);
-        ++initErrors;
-    }
-
-    if (initErrors) {
         return 1;
     }
 
@@ -980,7 +1001,10 @@ int main(int argc, char** argv) {
     }
 
     int sockoptTrue = 1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &sockoptTrue, sizeof(sockoptTrue));
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &sockoptTrue, sizeof(sockoptTrue)) == -1) {
+        perror("Failed to set socket options");
+        return 1;
+    }
 
     struct sockaddr_in addr;
 
