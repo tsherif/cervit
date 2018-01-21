@@ -62,7 +62,6 @@ void exit(int status);
 #define REQUEST_MAX_SIZE (TRANSFER_CHUNK_SIZE * 4)
 #define STATIC_STRING_LENGTH(string) (sizeof(string) - 1)
 
-// TODO(Tarek): Can I write from file directly to socket?
 // TODO(Tarek): Normalize URI
 
 typedef struct {
