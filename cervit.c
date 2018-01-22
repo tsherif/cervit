@@ -62,6 +62,8 @@ void exit(int status);
 #define REQUEST_MAX_SIZE (TRANSFER_CHUNK_SIZE * 4)
 #define STATIC_STRING_LENGTH(string) (sizeof(string) - 1)
 
+// TODO(Tarek): Spec required: Include Date header in responses
+// TODO(Tarek): Spec required: 400 response if no Host header in request
 // TODO(Tarek): Normalize URI
 
 typedef struct {
