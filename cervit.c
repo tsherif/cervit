@@ -21,6 +21,12 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ///////////////////////////////////////////////////////////////////////////////////
 
+// TODO(Tarek): Version number
+// TODO(Tarek): Server in error responses
+// TODO(Tarek): 400 response if no Host header in request (RFC 2616, 14.23)
+// TODO(Tarek): Accept only \n line ending in request (RFC 2616, 19.3)
+// TODO(Tarek): Normalize URI
+
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -43,7 +49,6 @@ void exit(int status);
 
 
 #define HTTP_1_1_VERSION "HTTP/1.1"
-#define HTTP_1_0_VERSION "HTTP/1.0"
 #define HTTP_OK_HEADER "HTTP/1.1 200 OK\r\n"
 #define HTTP_CACHE_HEADERS "Server: cervit/0.1\r\nCache-control: no-cache, no-store, must-revalidate\r\nExpires: 0\r\nPragma: no-cache\r\n"
 #define HTTP_CONTENT_TYPE_KEY "Content-Type: "
@@ -55,11 +60,14 @@ void exit(int status);
 #define HTTP_METHOD_HEAD 2
 #define HTTP_METHOD_UNSUPPORTED -1
 
-#define BAD_REQUEST "HTTP/1.1 400 BAD REQUEST\r\nContent-Type: text/html\r\nContent-Length: 59\r\n\r\n<html><body>\n<h1>Invalid HTTP request!</h1>\n</body></html>\n"
-#define NOT_FOUND "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\nContent-Length: 53\r\n\r\n<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
-#define TOO_LARGE "HTTP/1.1 431 REQUEST HEADERS TOO LARGE\r\nContent-Type: text/html\r\nContent-Length: 53\r\n\r\n<html><body>\n<h1>Request too large!</h1>\n</body></html>\n"
-#define METHOD_NOT_SUPPORTED "HTTP/1.1 501 NOT IMPLEMENTED\r\nContent-Type: text/html\r\nContent-Length: 55\r\n\r\n<html><body>\n<h1>Method not supported!</h1>\n</body></html>\n"
-#define VERSION_NOT_SUPPORTED "HTTP/1.1 505 VERSION NOT SUPPORTED\r\nContent-Type: text/html\r\nContent-Length: 70\r\n\r\n<html><body>\n<h1>HTTP version must be 1.1 or 1.0!</h1>\n</body></html>\n"
+#define BAD_REQUEST_HEADERS "HTTP/1.1 400 BAD REQUEST\r\nContent-Type: text/html\r\nContent-Length: 59\r\n"
+#define BAD_REQUEST_BODY "<html><body>\n<h1>Invalid HTTP request!</h1>\n</body></html>\n"
+#define NOT_FOUND_HEADERS "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\nContent-Length: 53\r\n"
+#define NOT_FOUND_BODY "<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
+#define METHOD_NOT_SUPPORTED_HEADERS "HTTP/1.1 501 NOT IMPLEMENTED\r\nContent-Type: text/html\r\nContent-Length: 55\r\n"
+#define METHOD_NOT_SUPPORTED_BODY "<html><body>\n<h1>Method not supported!</h1>\n</body></html>\n"
+#define VERSION_NOT_SUPPORTED_HEADERS "HTTP/1.1 505 VERSION NOT SUPPORTED\r\nContent-Type: text/html\r\nContent-Length: 63\r\n"
+#define VERSION_NOT_SUPPORTED_BODY "<html><body>\n<h1>HTTP version must be 1.1!</h1>\n</body></html>\n"
 
 #define TRANSFER_CHUNK_SIZE 32768
 #define REQUEST_MAX_SIZE (TRANSFER_CHUNK_SIZE * 4)
@@ -67,11 +75,6 @@ void exit(int status);
 
 const char* DAY_STRINGS[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
 const char* MONTH_STRINGS[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-
-// TODO(Tarek): Include Date header in error responses
-// TODO(Tarek): 400 response if no Host header in request (RFC 2616, 14.23)
-// TODO(Tarek): Accept only \n line ending in request (RFC 2616, 19.3)
-// TODO(Tarek): Normalize URI
 
 typedef struct {
     char* data;
@@ -393,6 +396,16 @@ void buffer_appendDate(Buffer* buffer) {
     buffer_appendFromString(buffer, " GMT"); 
 }
 
+void buffer_errorResponse(Buffer* buffer, const char* headers, const char* body) {
+    buffer->length = 0;
+
+    buffer_appendFromString(buffer, headers);
+    buffer_appendFromString(buffer, HTTP_DATE_KEY);
+    buffer_appendDate(buffer);
+    buffer_appendFromString(buffer, HTTP_NEWLINE HTTP_NEWLINE);
+    buffer_appendFromString(buffer, body);
+}
+
 // If buffer isn't currently null-terminated, add null
 // in first unused byte.
 void buffer_externalNull(Buffer* buffer) {
@@ -705,10 +718,12 @@ void *handleRequest(void* args) {
                 break;
             } else if (received < TRANSFER_CHUNK_SIZE) {
                 // Request ended without header terminator
-                write(thread->connection, BAD_REQUEST, STATIC_STRING_LENGTH(BAD_REQUEST));  
+                buffer_errorResponse(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
+                write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
                 break;
             } else if (thread->requestBuffer.length > REQUEST_MAX_SIZE) {
-                write(thread->connection, TOO_LARGE, STATIC_STRING_LENGTH(TOO_LARGE));  
+                buffer_errorResponse(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
+                write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
                 break;
             }
         }
@@ -719,7 +734,8 @@ void *handleRequest(void* args) {
         }
 
         if (parseRequest(&thread->requestBuffer, &thread->request) == -1) {
-            write(thread->connection, BAD_REQUEST, STATIC_STRING_LENGTH(BAD_REQUEST)); 
+            buffer_errorResponse(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
+            write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
             close(thread->connection);
             continue;
         }
@@ -727,13 +743,15 @@ void *handleRequest(void* args) {
         method = methodCode(&thread->request.method);
 
         if (method == HTTP_METHOD_UNSUPPORTED) {
-            write(thread->connection, METHOD_NOT_SUPPORTED, STATIC_STRING_LENGTH(METHOD_NOT_SUPPORTED));  
+            buffer_errorResponse(&thread->responseBuffer, METHOD_NOT_SUPPORTED_HEADERS, METHOD_NOT_SUPPORTED_BODY);
+            write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
             close(thread->connection);
             continue;
         }
 
         if (!array_caseEquals(thread->request.version.data, thread->request.version.length, HTTP_1_1_VERSION, STATIC_STRING_LENGTH(HTTP_1_1_VERSION))) {
-            write(thread->connection, VERSION_NOT_SUPPORTED, STATIC_STRING_LENGTH(VERSION_NOT_SUPPORTED));  
+            buffer_errorResponse(&thread->responseBuffer, VERSION_NOT_SUPPORTED_HEADERS, VERSION_NOT_SUPPORTED_BODY);
+            write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
             close(thread->connection);
             continue;
         }
@@ -744,7 +762,8 @@ void *handleRequest(void* args) {
 
         if (returnVal == -1) {
             perror("Failed to stat url");
-            write(thread->connection, NOT_FOUND, STATIC_STRING_LENGTH(NOT_FOUND));  
+            buffer_errorResponse(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
+            write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);  
             close(thread->connection);
             continue;
         }
@@ -775,7 +794,8 @@ void *handleRequest(void* args) {
 
                 if (!dir) {
                     perror("Failed to open directory");
-                    write(thread->connection, NOT_FOUND, STATIC_STRING_LENGTH(NOT_FOUND));  
+                    buffer_errorResponse(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
+                    write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length); 
                     close(thread->connection);
                     continue;
                 }
@@ -887,7 +907,8 @@ void *handleRequest(void* args) {
 
         if (fd == -1) {
             perror("Failed to open file");
-            write(thread->connection, NOT_FOUND, STATIC_STRING_LENGTH(NOT_FOUND));  
+            buffer_errorResponse(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
+            write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
             close(thread->connection);
             continue; 
         }
@@ -896,7 +917,8 @@ void *handleRequest(void* args) {
 
         if (returnVal == -1) {
             perror("Failed to stat file");
-            write(thread->connection, NOT_FOUND, STATIC_STRING_LENGTH(NOT_FOUND));  
+            buffer_errorResponse(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
+            write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
             close(thread->connection);
             close(fd);
             continue;
@@ -904,7 +926,7 @@ void *handleRequest(void* args) {
 
         size_t fileSize = fileInfo.st_size;
 
-        buffer_appendFromArray(&thread->responseBuffer, HTTP_OK_HEADER, STATIC_STRING_LENGTH(HTTP_OK_HEADER));
+        buffer_appendFromString(&thread->responseBuffer, HTTP_OK_HEADER);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CACHE_HEADERS);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_TYPE_KEY);
         buffer_appendFromString(&thread->responseBuffer, contentTypeHeader(&thread->request.url));
