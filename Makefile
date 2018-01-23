@@ -21,9 +21,10 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ###################################################################################
 
+CERVIT_VERSION=0.2
 CC=gcc 
 CFLAGS=-g -Wall -Wextra -Wno-unused-parameter -pedantic 
 LDLIBS=-pthread
 
 cervit: cervit.c
-	$(CC) $(CFLAGS) -o cervit cervit.c $(LDLIBS)
+	$(CC) $(CFLAGS) -DVERSION=\"$(CERVIT_VERSION)\" -o cervit cervit.c $(LDLIBS)

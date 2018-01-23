@@ -21,7 +21,6 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ///////////////////////////////////////////////////////////////////////////////////
 
-// TODO(Tarek): Version number
 // TODO(Tarek): Server in error responses
 // TODO(Tarek): 400 response if no Host header in request (RFC 2616, 14.23)
 // TODO(Tarek): Accept only \n line ending in request (RFC 2616, 19.3)
@@ -47,10 +46,13 @@ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 int atexit(void (*func)(void));
 void exit(int status);
 
+#ifndef VERSION
+#define VERSION "0.0"
+#endif
 
 #define HTTP_1_1_VERSION "HTTP/1.1"
 #define HTTP_OK_HEADER "HTTP/1.1 200 OK\r\n"
-#define HTTP_CACHE_HEADERS "Server: cervit/0.1\r\nCache-control: no-cache, no-store, must-revalidate\r\nExpires: 0\r\nPragma: no-cache\r\n"
+#define HTTP_CACHE_HEADERS "Server: cervit/" VERSION "\r\nCache-control: no-cache, no-store, must-revalidate\r\nExpires: 0\r\nPragma: no-cache\r\n"
 #define HTTP_CONTENT_TYPE_KEY "Content-Type: "
 #define HTTP_CONTENT_LENGTH_KEY "Content-Length: "
 #define HTTP_DATE_KEY "Date: "
@@ -999,6 +1001,7 @@ void onSignal(int sig) {
 }
 
 int main(int argc, char** argv) {
+
     unsigned short port = 5000;
 
     numThreads = sysconf(_SC_NPROCESSORS_CONF);
@@ -1015,7 +1018,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    printf("Starting cervit on port %d using %ld threads\n", port, numThreads);
+    printf("Starting cervit v" VERSION " on port %d using %ld threads\n", port, numThreads);
 
     atexit(onClose);
     signal(SIGINT, onSignal);
