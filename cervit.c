@@ -21,7 +21,6 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ///////////////////////////////////////////////////////////////////////////////////
 
-// TODO(Tarek): Server in error responses
 // TODO(Tarek): 400 response if no Host header in request (RFC 2616, 14.23)
 // TODO(Tarek): Accept only \n line ending in request (RFC 2616, 19.3)
 // TODO(Tarek): Normalize URI
@@ -62,13 +61,13 @@ void exit(int status);
 #define HTTP_METHOD_HEAD 2
 #define HTTP_METHOD_UNSUPPORTED -1
 
-#define BAD_REQUEST_HEADERS "HTTP/1.1 400 BAD REQUEST\r\nContent-Type: text/html\r\nContent-Length: 59\r\n"
+#define BAD_REQUEST_HEADERS "HTTP/1.1 400 BAD REQUEST\r\nServer: cervit/" VERSION "\r\nContent-Type: text/html\r\nContent-Length: 59\r\n"
 #define BAD_REQUEST_BODY "<html><body>\n<h1>Invalid HTTP request!</h1>\n</body></html>\n"
-#define NOT_FOUND_HEADERS "HTTP/1.1 404 NOT FOUND\r\nContent-Type: text/html\r\nContent-Length: 53\r\n"
+#define NOT_FOUND_HEADERS "HTTP/1.1 404 NOT FOUND\r\nServer: cervit/" VERSION "\r\nContent-Type: text/html\r\nContent-Length: 53\r\n"
 #define NOT_FOUND_BODY "<html><body>\n<h1>File not found!</h1>\n</body></html>\n"
-#define METHOD_NOT_SUPPORTED_HEADERS "HTTP/1.1 501 NOT IMPLEMENTED\r\nContent-Type: text/html\r\nContent-Length: 55\r\n"
+#define METHOD_NOT_SUPPORTED_HEADERS "HTTP/1.1 501 NOT IMPLEMENTED\r\nServer: cervit/" VERSION "\r\nContent-Type: text/html\r\nContent-Length: 55\r\n"
 #define METHOD_NOT_SUPPORTED_BODY "<html><body>\n<h1>Method not supported!</h1>\n</body></html>\n"
-#define VERSION_NOT_SUPPORTED_HEADERS "HTTP/1.1 505 VERSION NOT SUPPORTED\r\nContent-Type: text/html\r\nContent-Length: 63\r\n"
+#define VERSION_NOT_SUPPORTED_HEADERS "HTTP/1.1 505 VERSION NOT SUPPORTED\r\nServer: cervit/" VERSION "\r\nContent-Type: text/html\r\nContent-Length: 63\r\n"
 #define VERSION_NOT_SUPPORTED_BODY "<html><body>\n<h1>HTTP version must be 1.1!</h1>\n</body></html>\n"
 
 #define TRANSFER_CHUNK_SIZE 32768
