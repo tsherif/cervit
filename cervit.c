@@ -31,6 +31,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include <dirent.h>
+#include <time.h>
 
 // Forward declare so I don't have to include stdlib.h, string.h
 void *malloc(size_t size);
@@ -40,12 +41,14 @@ void *memcpy(void * restrict dest, const void * restrict src, size_t n);
 int atexit(void (*func)(void));
 void exit(int status);
 
+
 #define HTTP_1_1_VERSION "HTTP/1.1"
 #define HTTP_1_0_VERSION "HTTP/1.0"
 #define HTTP_OK_HEADER "HTTP/1.1 200 OK\r\n"
 #define HTTP_CACHE_HEADERS "Server: cervit/0.1\r\nCache-control: no-cache, no-store, must-revalidate\r\nExpires: 0\r\nPragma: no-cache\r\n"
 #define HTTP_CONTENT_TYPE_KEY "Content-Type: "
 #define HTTP_CONTENT_LENGTH_KEY "Content-Length: "
+#define HTTP_DATE_KEY "Date: "
 #define HTTP_NEWLINE "\r\n"
 
 #define HTTP_METHOD_GET 1
@@ -62,8 +65,12 @@ void exit(int status);
 #define REQUEST_MAX_SIZE (TRANSFER_CHUNK_SIZE * 4)
 #define STATIC_STRING_LENGTH(string) (sizeof(string) - 1)
 
-// TODO(Tarek): Spec required: Include Date header in responses
-// TODO(Tarek): Spec required: 400 response if no Host header in request
+const char* DAY_STRINGS[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+const char* MONTH_STRINGS[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+// TODO(Tarek): Include Date header in error responses
+// TODO(Tarek): 400 response if no Host header in request (RFC 2616, 14.23)
+// TODO(Tarek): Accept only \n line ending in request (RFC 2616, 19.3)
 // TODO(Tarek): Normalize URI
 
 typedef struct {
@@ -327,17 +334,17 @@ void buffer_appendFromString(Buffer* buffer, const char* string) {
     buffer_appendFromArray(buffer, string, string_length(string));
 }
 
-void buffer_appendFromSizeT(Buffer* buffer, size_t n) {
-    size_t pow = 1;
-    size_t length = 1;
-    while (pow * 10 < n) {
+void buffer_appendFromUint(Buffer* buffer, unsigned long n) {
+    unsigned long pow = 1;
+    unsigned long length = 1;
+    while (pow * 10 <= n) {
         pow *= 10;
         ++length;
     }
 
     char result[length];
 
-    size_t i = 0;
+    unsigned long i = 0;
     while (pow > 0) {
         char digit = n / pow;
         result[i] = digit + '0';
@@ -348,6 +355,42 @@ void buffer_appendFromSizeT(Buffer* buffer, size_t n) {
     }
 
     buffer_appendFromArray(buffer, result, length);
+}
+
+void buffer_appendDate(Buffer* buffer) {
+    time_t t = time(NULL);
+    struct tm date;
+    gmtime_r(&t, &date);
+
+    buffer_checkAllocation(buffer, buffer->length + 29);
+
+    buffer_appendFromString(buffer, DAY_STRINGS[date.tm_wday]);
+    buffer_appendFromString(buffer, ", ");
+    buffer_appendFromUint(buffer, date.tm_mday);
+    buffer_appendFromString(buffer, " ");
+    buffer_appendFromString(buffer, MONTH_STRINGS[date.tm_mon]);
+    buffer_appendFromString(buffer, " ");
+    buffer_appendFromUint(buffer, date.tm_year + 1900);
+    buffer_appendFromString(buffer, " ");
+
+    if (date.tm_hour < 10) {
+        buffer_appendFromString(buffer, "0");
+    }
+    buffer_appendFromUint(buffer, date.tm_hour);
+    buffer_appendFromString(buffer, ":");
+
+    if (date.tm_min < 10) {
+        buffer_appendFromString(buffer, "0");
+    }
+    buffer_appendFromUint(buffer, date.tm_min);
+    buffer_appendFromString(buffer, ":"); 
+
+    if (date.tm_sec < 10) {
+        buffer_appendFromString(buffer, "0");
+    }
+    buffer_appendFromUint(buffer, date.tm_sec);
+
+    buffer_appendFromString(buffer, " GMT"); 
 }
 
 // If buffer isn't currently null-terminated, add null
@@ -689,10 +732,7 @@ void *handleRequest(void* args) {
             continue;
         }
 
-        if (
-            !array_caseEquals(thread->request.version.data, thread->request.version.length, HTTP_1_1_VERSION, STATIC_STRING_LENGTH(HTTP_1_1_VERSION)) &&
-            !array_caseEquals(thread->request.version.data, thread->request.version.length, HTTP_1_0_VERSION, STATIC_STRING_LENGTH(HTTP_1_0_VERSION))
-        ) {
+        if (!array_caseEquals(thread->request.version.data, thread->request.version.length, HTTP_1_1_VERSION, STATIC_STRING_LENGTH(HTTP_1_1_VERSION))) {
             write(thread->connection, VERSION_NOT_SUPPORTED, STATIC_STRING_LENGTH(VERSION_NOT_SUPPORTED));  
             close(thread->connection);
             continue;
@@ -825,7 +865,10 @@ void *handleRequest(void* args) {
                 
                 buffer_appendFromString(&thread->responseBuffer, HTTP_OK_HEADER HTTP_CACHE_HEADERS "Content-Type: text/html" HTTP_NEWLINE);
                 buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_LENGTH_KEY);
-                buffer_appendFromSizeT(&thread->responseBuffer, thread->dirListingBuffer.length);
+                buffer_appendFromUint(&thread->responseBuffer, thread->dirListingBuffer.length);
+                buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE);
+                buffer_appendFromString(&thread->responseBuffer, HTTP_DATE_KEY);
+                buffer_appendDate(&thread->responseBuffer);
                 buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE HTTP_NEWLINE);
 
                 if (method == HTTP_METHOD_GET) {
@@ -867,9 +910,12 @@ void *handleRequest(void* args) {
         buffer_appendFromString(&thread->responseBuffer, contentTypeHeader(&thread->request.url));
         buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_LENGTH_KEY);
-        buffer_appendFromSizeT(&thread->responseBuffer, fileSize);
+        buffer_appendFromUint(&thread->responseBuffer, fileSize);
+        buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE);
+        buffer_appendFromString(&thread->responseBuffer, HTTP_DATE_KEY);
+        buffer_appendDate(&thread->responseBuffer);
         buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE HTTP_NEWLINE);
-
+        
         write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
 
         if (method == HTTP_METHOD_GET) {
