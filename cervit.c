@@ -969,6 +969,10 @@ void *handleRequest(void* args) {
 }
 
 void onClose(void) {
+    pthread_mutex_destroy(&currentConnectionLock);
+    pthread_cond_destroy(&currentConnectionWritten);
+    pthread_cond_destroy(&currentConnectionRead);
+
     if (!threads) {
         return;
     }
@@ -986,10 +990,6 @@ void onClose(void) {
         close(threads[i].connection);
     }
     free(threads);
-
-    pthread_mutex_destroy(&currentConnectionLock);
-    pthread_cond_destroy(&currentConnectionWritten);
-    pthread_cond_destroy(&currentConnectionRead);
 
     close(sock);
 }
@@ -1024,7 +1024,33 @@ int main(int argc, char** argv) {
     signal(SIGTSTP, onSignal);
     signal(SIGTERM, onSignal);
 
+    char initError = 0;
+
+    // Set up thread control
     int errorCode = 0;
+    errorCode = pthread_mutex_init(&currentConnectionLock, NULL);
+    if (errorCode) {
+        fprintf(stderr, "Failed to create mutex. Error code: %d", errorCode);
+        initError = 1;
+    }
+
+    errorCode = pthread_cond_init(&currentConnectionWritten, NULL);
+    if (errorCode) {
+        fprintf(stderr, "Failed to create write condition. Error code: %d", errorCode);
+        initError = 1;
+    }
+
+    errorCode = pthread_cond_init(&currentConnectionRead, NULL);
+    if (errorCode) {
+        fprintf(stderr, "Failed to create read condition. Error code: %d", errorCode);
+        initError = 1;
+    }
+
+    if (initError) {
+        return 1;
+    }
+
+    //Initialize threads
     threads = malloc(numThreads * sizeof(Thread));
 
     if (!threads) {
@@ -1034,11 +1060,6 @@ int main(int argc, char** argv) {
 
     for (int i = 0; i < numThreads; ++i) {
         threads[i].id = i;
-        errorCode = pthread_create(&threads[i].thread, NULL, handleRequest, &threads[i]);
-        if (errorCode) {
-            fprintf(stderr, "Failed to create thread. Error code: %d", errorCode);
-            return 1;
-        }
         buffer_init(&threads[i].request.method, 16);
         buffer_init(&threads[i].request.url, 1024);
         buffer_init(&threads[i].request.version, 16);
@@ -1047,29 +1068,20 @@ int main(int argc, char** argv) {
         buffer_init(&threads[i].dirListingBuffer, 512);
         buffer_init(&threads[i].dirnameBuffer, 512);
         buffer_init(&threads[i].filenameBuffer, 512);
-    }
-
-    errorCode = pthread_mutex_init(&currentConnectionLock, NULL);
-    if (errorCode) {
-        fprintf(stderr, "Failed to create mutex. Error code: %d", errorCode);
-        return 1;
-    }
-
-    errorCode = pthread_cond_init(&currentConnectionWritten, NULL);
-    if (errorCode) {
-        fprintf(stderr, "Failed to create write condition. Error code: %d", errorCode);
-        return 1;
-    }
-
-    errorCode = pthread_cond_init(&currentConnectionRead, NULL);
-    if (errorCode) {
-        fprintf(stderr, "Failed to create read condition. Error code: %d", errorCode);
-        return 1;
+        errorCode = pthread_create(&threads[i].thread, NULL, handleRequest, &threads[i]);
+        if (errorCode) {
+            fprintf(stderr, "Failed to create thread. Error code: %d", errorCode);
+            initError = 1;
+        }
     }
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == -1) {
         perror("Failed to create socket");
+        initError = 1;
+    }
+
+    if (initError) {
         return 1;
     }
 
