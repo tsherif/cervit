@@ -289,6 +289,17 @@ size_t array_findFromByteSet(const char* array, size_t length, char* byteSet, si
     return length;
 }
 
+int array_incrementPointer(char** array, size_t* length, size_t increment) {
+    if (increment >= *length) {
+        return -1;
+    }
+
+    *array += increment;
+    *length -= increment;
+
+    return 0;
+}
+
 void buffer_init(Buffer* buffer, size_t size) {
     buffer->data = malloc(size);
     buffer->length = 0;
@@ -563,19 +574,15 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
 
     // Skip leading newlines
     size_t index = array_skipHttpNewlines(requestString, requestStringLength);
-    if (index == requestStringLength) {
+    if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
-    requestString += index;
-    requestStringLength -= index;
 
     // Get method
     index = array_skipSpace(requestString, requestStringLength);
-    if (index == requestStringLength) {
+    if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
-    requestString += index;
-    requestStringLength -= index;
 
     index = array_findFromByteSet(requestString, requestStringLength, " \t", 2);
     if (index == requestStringLength) {
@@ -590,11 +597,9 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
     buffer_appendFromArray(&request->url, ".", 1);
 
     index = array_skipSpace(requestString, requestStringLength);
-    if (index == requestStringLength) {
+    if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
-    requestString += index;
-    requestStringLength -= index;
 
     index = array_findFromByteSet(requestString, requestStringLength, "%?# \t", 5);
     if (index == requestStringLength) {
@@ -629,11 +634,9 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
 
     // HTTP version string
     index = array_skipSpace(requestString, requestStringLength);
-    if (index == requestStringLength) {
+    if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
-    requestString += index;
-    requestStringLength -= index;
 
     index = array_findFromByteSet(requestString, requestStringLength, " \t\r\n", 4);
     if (index == requestStringLength) {
@@ -644,11 +647,9 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
     requestStringLength -= index;
 
     index = array_skipSpace(requestString, requestStringLength);
-    if (index == requestStringLength) {
+    if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
-    requestString += index;
-    requestStringLength -= index;
 
     if (requestStringLength < STATIC_STRING_LENGTH(HTTP_NEWLINE) || !array_equals(requestString, STATIC_STRING_LENGTH(HTTP_NEWLINE), HTTP_NEWLINE, STATIC_STRING_LENGTH(HTTP_NEWLINE))) {
         return -1;
@@ -663,60 +664,44 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
     char hostFound = 0;
     while (!hostFound && index < (size_t) headerEnd) {
         size_t index = array_skipHttpNewlines(requestString, requestStringLength);
-        if (index == requestStringLength) {
+        if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
             return -1;
         }
-        requestString += index;
-        requestStringLength -= index;
 
         index = array_skipSpace(requestString, requestStringLength);
-        if (index == requestStringLength) {
+        if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
             return -1;
         }
-        requestString += index;
-        requestStringLength -= index;
 
         // Start of header key
         index = array_findFromByteSet(requestString, requestStringLength, ": \t\r\n", 5);
-        if (index == requestStringLength) {
-            return -1;
-        }
         if (array_caseEquals(requestString, index, "Host", STATIC_STRING_LENGTH("Host"))) {
             hostFound = 1;
         }
-        requestString += index;
-        requestStringLength -= index;
-
-        index = array_skipSpace(requestString, requestStringLength);
-        if (index == requestStringLength) {
+        if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
             return -1;
         }
-        requestString += index;
-        requestStringLength -= index;
+
+        index = array_skipSpace(requestString, requestStringLength);
+        if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
+            return -1;
+        }
 
         if (*requestString != ':') {
             return -1;
         }
 
         index = array_skipSpace(requestString, requestStringLength);
-        if (index == requestStringLength) {
+        if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
             return -1;
         }
-        requestString += index;
-        requestStringLength -= index;
 
         index = array_findFromByteSet(requestString, requestStringLength, HTTP_NEWLINE, STATIC_STRING_LENGTH(HTTP_NEWLINE));
-        if (index == requestStringLength) {
+        if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
             return -1;
         }
-        requestString += index;
-        requestStringLength -= index;
 
-        if (hostFound) {
-            break;
-        }
-
-        if (array_equals(requestString, STATIC_STRING_LENGTH(HTTP_END_HEADER), HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER))) {
+        if (hostFound || array_equals(requestString, STATIC_STRING_LENGTH(HTTP_END_HEADER), HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER))) {
             break;
         }
     }
