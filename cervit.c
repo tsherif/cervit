@@ -21,7 +21,6 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ///////////////////////////////////////////////////////////////////////////////////
 
-// TODO(Tarek): 400 response if no Host header in request (RFC 2616, 14.23)
 // TODO(Tarek): Accept only \n line ending in request (RFC 2616, 19.3)
 // TODO(Tarek): Normalize URI
 
@@ -56,6 +55,7 @@ void exit(int status);
 #define HTTP_CONTENT_LENGTH_KEY "Content-Length: "
 #define HTTP_DATE_KEY "Date: "
 #define HTTP_NEWLINE "\r\n"
+#define HTTP_END_HEADER HTTP_NEWLINE HTTP_NEWLINE
 
 #define HTTP_METHOD_GET 1
 #define HTTP_METHOD_HEAD 2
@@ -403,7 +403,7 @@ void buffer_errorResponse(Buffer* buffer, const char* headers, const char* body)
     buffer_appendFromString(buffer, headers);
     buffer_appendFromString(buffer, HTTP_DATE_KEY);
     buffer_appendDate(buffer);
-    buffer_appendFromString(buffer, HTTP_NEWLINE HTTP_NEWLINE);
+    buffer_appendFromString(buffer, HTTP_END_HEADER);
     buffer_appendFromString(buffer, body);
 }
 
@@ -553,7 +553,6 @@ int methodCode(Buffer* buffer) {
     return HTTP_METHOD_UNSUPPORTED;
 }
 
-// Currently just gets method and URL
 int parseRequest(const Buffer* requestBuffer, Request* request) {
     request->method.length = 0;
     request->url.length = 0;
@@ -578,9 +577,7 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
     requestString += index;
     requestStringLength -= index;
 
-
     index = array_findFromByteSet(requestString, requestStringLength, " \t", 2);
-    
     if (index == requestStringLength) {
         return -1;
     }
@@ -599,7 +596,7 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
     requestString += index;
     requestStringLength -= index;
 
-    index = array_findFromByteSet(requestString, requestStringLength, "%?# \t", 4);
+    index = array_findFromByteSet(requestString, requestStringLength, "%?# \t", 5);
     if (index == requestStringLength) {
         return -1;
     }
@@ -621,7 +618,7 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
             return -1;
         }
 
-        index = array_findFromByteSet(requestString, requestStringLength, "%?# \t", 4);
+        index = array_findFromByteSet(requestString, requestStringLength, "%?# \t", 5);
         if (index == requestStringLength) {
             return -1;
         }
@@ -654,6 +651,77 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
     requestStringLength -= index;
 
     if (requestStringLength < STATIC_STRING_LENGTH(HTTP_NEWLINE) || !array_equals(requestString, STATIC_STRING_LENGTH(HTTP_NEWLINE), HTTP_NEWLINE, STATIC_STRING_LENGTH(HTTP_NEWLINE))) {
+        return -1;
+    }
+
+    ssize_t headerEnd = array_find(requestString, requestStringLength, HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER));
+    if (headerEnd == -1) {
+        return -1;
+    }
+
+    // Find "Host" header. Required to respond with 400 if not found (RFC 2616, 14.23)
+    char hostFound = 0;
+    while (!hostFound && index < (size_t) headerEnd) {
+        size_t index = array_skipHttpNewlines(requestString, requestStringLength);
+        if (index == requestStringLength) {
+            return -1;
+        }
+        requestString += index;
+        requestStringLength -= index;
+
+        index = array_skipSpace(requestString, requestStringLength);
+        if (index == requestStringLength) {
+            return -1;
+        }
+        requestString += index;
+        requestStringLength -= index;
+
+        // Start of header key
+        index = array_findFromByteSet(requestString, requestStringLength, ": \t\r\n", 5);
+        if (index == requestStringLength) {
+            return -1;
+        }
+        if (array_caseEquals(requestString, index, "Host", STATIC_STRING_LENGTH("Host"))) {
+            hostFound = 1;
+        }
+        requestString += index;
+        requestStringLength -= index;
+
+        index = array_skipSpace(requestString, requestStringLength);
+        if (index == requestStringLength) {
+            return -1;
+        }
+        requestString += index;
+        requestStringLength -= index;
+
+        if (*requestString != ':') {
+            return -1;
+        }
+
+        index = array_skipSpace(requestString, requestStringLength);
+        if (index == requestStringLength) {
+            return -1;
+        }
+        requestString += index;
+        requestStringLength -= index;
+
+        index = array_findFromByteSet(requestString, requestStringLength, HTTP_NEWLINE, STATIC_STRING_LENGTH(HTTP_NEWLINE));
+        if (index == requestStringLength) {
+            return -1;
+        }
+        requestString += index;
+        requestStringLength -= index;
+
+        if (hostFound) {
+            break;
+        }
+
+        if (array_equals(requestString, STATIC_STRING_LENGTH(HTTP_END_HEADER), HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER))) {
+            break;
+        }
+    }
+
+    if (!hostFound) {
         return -1;
     }
 
@@ -714,7 +782,7 @@ void *handleRequest(void* args) {
             int index = thread->requestBuffer.length > 3 ? thread->requestBuffer.length - 3 : 0;
             buffer_appendFromArray(&thread->requestBuffer, requestChunk, received);
 
-            if (array_find(thread->requestBuffer.data + index, thread->requestBuffer.length - index, "\r\n\r\n", 4) != -1) {
+            if (array_find(thread->requestBuffer.data + index, thread->requestBuffer.length - index, HTTP_END_HEADER, 4) != -1) {
                 validRequest = 1;
                 break;
             } else if (received < TRANSFER_CHUNK_SIZE) {
@@ -890,7 +958,7 @@ void *handleRequest(void* args) {
                 buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE);
                 buffer_appendFromString(&thread->responseBuffer, HTTP_DATE_KEY);
                 buffer_appendDate(&thread->responseBuffer);
-                buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE HTTP_NEWLINE);
+                buffer_appendFromString(&thread->responseBuffer, HTTP_END_HEADER);
 
                 if (method == HTTP_METHOD_GET) {
                     buffer_appendFromArray(&thread->responseBuffer, thread->dirListingBuffer.data, thread->dirListingBuffer.length);
@@ -937,7 +1005,7 @@ void *handleRequest(void* args) {
         buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE);
         buffer_appendFromString(&thread->responseBuffer, HTTP_DATE_KEY);
         buffer_appendDate(&thread->responseBuffer);
-        buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE HTTP_NEWLINE);
+        buffer_appendFromString(&thread->responseBuffer, HTTP_END_HEADER);
         
         write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
 
