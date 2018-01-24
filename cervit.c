@@ -231,7 +231,7 @@ char array_caseEquals(char* array1, size_t length1, char* array2, size_t length2
     return 1;
 }
 
-ssize_t array_find(char* array1, size_t length1, char* array2, size_t length2) {
+size_t array_find(char* array1, size_t length1, char* array2, size_t length2) {
     if (length1 < length2) {
         return -1;
     }
@@ -243,7 +243,7 @@ ssize_t array_find(char* array1, size_t length1, char* array2, size_t length2) {
         }
     }
 
-    return -1;
+    return length1;
 }
 
 size_t array_skipSpace(char* array, size_t length) {
@@ -655,8 +655,8 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
         return -1;
     }
 
-    ssize_t headerEnd = array_find(requestString, requestStringLength, HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER));
-    if (headerEnd == -1) {
+    size_t headerEnd = array_find(requestString, requestStringLength, HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER));
+    if (headerEnd == requestStringLength) {
         return -1;
     }
 
@@ -767,7 +767,7 @@ void *handleRequest(void* args) {
             int index = thread->requestBuffer.length > 3 ? thread->requestBuffer.length - 3 : 0;
             buffer_appendFromArray(&thread->requestBuffer, requestChunk, received);
 
-            if (array_find(thread->requestBuffer.data + index, thread->requestBuffer.length - index, HTTP_END_HEADER, 4) != -1) {
+            if (array_find(thread->requestBuffer.data + index, thread->requestBuffer.length - index, HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER)) != thread->requestBuffer.length) {
                 validRequest = 1;
                 break;
             } else if (received < TRANSFER_CHUNK_SIZE) {
