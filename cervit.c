@@ -372,6 +372,62 @@ void buffer_appendFromUint(Buffer* buffer, unsigned long n) {
     buffer_appendFromArray(buffer, result, length);
 }
 
+void buffer_normalizePath(Buffer* buffer) {
+    // Skip ./ prefix
+    size_t readIndex = 2;
+    size_t writeIndex = 2;
+
+    char* path = buffer->data;
+    char c1, c2, c3;
+
+    while (readIndex < buffer->length) {
+        c1 = path[readIndex];
+
+        if (c1 == '.') {
+            if (readIndex + 1 == buffer->length) {
+                break;
+            }
+
+            c2 = path[readIndex + 1];
+            
+            if (c2 == '/') {
+                readIndex += 2;
+            } else if (c2 == '.') { 
+                if (readIndex + 2 == buffer->length) {
+                    break;
+                }
+
+                c3 = path[readIndex + 2];
+
+                if (c3 == '/') {
+                    readIndex += 3;
+
+                    while (writeIndex > 0 && path[writeIndex - 1] != '/') {
+                        --writeIndex;
+                    } 
+                } else {
+                    path[writeIndex] = path[readIndex];
+                    path[writeIndex + 1] = path[readIndex + 1];
+                    readIndex += 2;
+                    writeIndex += 2;
+                }
+
+            } else {
+                path[writeIndex] = path[readIndex];
+                ++readIndex;
+                ++writeIndex;
+            }
+
+        } else {
+            path[writeIndex] = path[readIndex];
+            ++readIndex;
+            ++writeIndex;
+        }
+    }
+
+    buffer->length = writeIndex;
+}
+
 void buffer_appendDate(Buffer* buffer) {
     time_t t = time(NULL);
     struct tm date;
