@@ -383,39 +383,41 @@ void buffer_normalizePath(Buffer* buffer) {
     while (readIndex < buffer->length) {
         c1 = path[readIndex];
 
-        if (c1 == '.') {
-            if (readIndex + 1 == buffer->length) {
+        // Only interested in segments beginning with '.'
+        if (c1 != '.' || (readIndex > 0 && path[readIndex - 1] != '/')) {
+            path[writeIndex] = path[readIndex];
+            ++readIndex;
+            ++writeIndex;
+            continue;
+        }
+
+        if (readIndex + 1 == buffer->length) {
+            break;
+        }
+
+        c2 = path[readIndex + 1];
+        
+        if (c2 == '/') {
+            readIndex += 2;
+        } else if (c2 == '.') { 
+            if (readIndex + 2 == buffer->length) {
                 break;
             }
 
-            c2 = path[readIndex + 1];
-            
-            if (c2 == '/') {
-                readIndex += 2;
-            } else if (c2 == '.') { 
-                if (readIndex + 2 == buffer->length) {
-                    break;
-                }
+            c3 = path[readIndex + 2];
 
-                c3 = path[readIndex + 2];
+            if (c3 == '/') {
+                readIndex += 3;
 
-                if (c3 == '/') {
-                    readIndex += 3;
-
-                    while (writeIndex > 0 && path[writeIndex - 1] != '/') {
-                        --writeIndex;
-                    } 
-                } else {
-                    path[writeIndex] = path[readIndex];
-                    path[writeIndex + 1] = path[readIndex + 1];
-                    readIndex += 2;
-                    writeIndex += 2;
-                }
-
+                --writeIndex;
+                while (writeIndex > 0 && path[writeIndex - 1] != '/') {
+                    --writeIndex;
+                } 
             } else {
                 path[writeIndex] = path[readIndex];
-                ++readIndex;
-                ++writeIndex;
+                path[writeIndex + 1] = path[readIndex + 1];
+                readIndex += 2;
+                writeIndex += 2;
             }
 
         } else {
@@ -423,6 +425,7 @@ void buffer_normalizePath(Buffer* buffer) {
             ++readIndex;
             ++writeIndex;
         }
+
     }
 
     buffer->length = writeIndex;
@@ -1109,6 +1112,13 @@ void onSignal(int sig) {
 }
 
 int main(int argc, char** argv) {
+
+    Buffer b;
+    buffer_init(&b, 64);
+    buffer_appendFromString(&b, "./hello/../c/d/./b");
+    printf("Before: %.*s\n", (int) b.length, b.data);
+    buffer_normalizePath(&b);
+    printf("After : %.*s\n", (int) b.length, b.data);
 
     unsigned short port = 5000;
 
