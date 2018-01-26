@@ -22,7 +22,6 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 // TODO(Tarek): Accept only \n line ending in request (RFC 2616, 19.3)
-// TODO(Tarek): Normalize URI
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -372,15 +371,50 @@ void buffer_appendFromUint(Buffer* buffer, unsigned long n) {
     buffer_appendFromArray(buffer, result, length);
 }
 
-void buffer_normalizePath(Buffer* buffer) {
-    // Skip ./ prefix
-    size_t readIndex = 2;
-    size_t writeIndex = 2;
-
+int buffer_URIHexDecode(Buffer* buffer) {
     char* path = buffer->data;
+    size_t length = buffer->length;
+    
+    size_t readIndex = 0;
+    size_t writeIndex = 0;
+
+    while (readIndex < length) {
+        if (path[readIndex] != '%') {
+            path[writeIndex] = path[readIndex];
+            ++readIndex;
+            ++writeIndex;
+            continue;
+        }
+
+        if (readIndex + 2 >= length) {
+            return -1;
+        }
+
+        char c = string_parseURIHexCode(path + readIndex + 1);
+        if (c > 0) {
+            path[writeIndex] = c;
+            readIndex += 3;
+            ++writeIndex;
+        } else {
+            return -1;
+        }
+    }
+
+    buffer->length = writeIndex;
+
+    return 0;
+}
+
+void buffer_removePathDotSegments(Buffer* buffer) {
+    // Skip ./ prefix
+    char* path = buffer->data + 2;
+    size_t length = buffer-> length - 2;
+    
+    size_t readIndex = 0;
+    size_t writeIndex = 0;
     char c1, c2, c3;
 
-    while (readIndex < buffer->length) {
+    while (readIndex < length) {
         c1 = path[readIndex];
 
         // Only interested in segments beginning with '.'
@@ -391,7 +425,7 @@ void buffer_normalizePath(Buffer* buffer) {
             continue;
         }
 
-        if (readIndex + 1 == buffer->length) {
+        if (readIndex + 1 == length) {
             break;
         }
 
@@ -400,7 +434,7 @@ void buffer_normalizePath(Buffer* buffer) {
         if (c2 == '/') {
             readIndex += 2;
         } else if (c2 == '.') { 
-            if (readIndex + 2 == buffer->length) {
+            if (readIndex + 2 == length) {
                 break;
             }
 
@@ -409,10 +443,12 @@ void buffer_normalizePath(Buffer* buffer) {
             if (c3 == '/') {
                 readIndex += 3;
 
-                --writeIndex;
-                while (writeIndex > 0 && path[writeIndex - 1] != '/') {
+                if (writeIndex > 0) {
                     --writeIndex;
-                } 
+                    while (writeIndex > 0 && path[writeIndex - 1] != '/') {
+                        --writeIndex;
+                    } 
+                }
             } else {
                 path[writeIndex] = path[readIndex];
                 path[writeIndex + 1] = path[readIndex + 1];
@@ -428,7 +464,7 @@ void buffer_normalizePath(Buffer* buffer) {
 
     }
 
-    buffer->length = writeIndex;
+    buffer->length = writeIndex + 2;
 }
 
 void buffer_appendDate(Buffer* buffer) {
@@ -660,7 +696,7 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
         return -1;
     }
 
-    index = array_findFromByteSet(requestString, requestStringLength, "%?# \t", 5);
+    index = array_findFromByteSet(requestString, requestStringLength, "?# \t", 4);
     if (index == requestStringLength) {
         return -1;
     }
@@ -668,28 +704,10 @@ int parseRequest(const Buffer* requestBuffer, Request* request) {
     requestString += index;
     requestStringLength -= index;
 
-    while (*requestString == '%') {
-        if (requestStringLength < 3) {
-            return -1;
-        }
-
-        char c = string_parseURIHexCode(requestString + 1);
-        if (c > 0) {
-            buffer_appendFromArray(&request->url, &c, 1);
-            requestString += 3;
-            requestStringLength -= 3;
-        } else {
-            return -1;
-        }
-
-        index = array_findFromByteSet(requestString, requestStringLength, "%?# \t", 5);
-        if (index == requestStringLength) {
-            return -1;
-        }
-        buffer_appendFromArray(&request->url, requestString, index);
-        requestString += index;
-        requestStringLength -= index;
+    if (buffer_URIHexDecode(&request->url) == -1) {
+        return -1;
     }
+    buffer_removePathDotSegments(&request->url);
 
     // HTTP version string
     index = array_skipSpace(requestString, requestStringLength);
@@ -1112,13 +1130,6 @@ void onSignal(int sig) {
 }
 
 int main(int argc, char** argv) {
-
-    Buffer b;
-    buffer_init(&b, 64);
-    buffer_appendFromString(&b, "./hello/../c/d/./b");
-    printf("Before: %.*s\n", (int) b.length, b.data);
-    buffer_normalizePath(&b);
-    printf("After : %.*s\n", (int) b.length, b.data);
 
     unsigned short port = 5000;
 
