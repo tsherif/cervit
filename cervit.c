@@ -22,6 +22,7 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 // TODO(Tarek): Accept only \n line ending in request (RFC 2616, 19.3)
+// TODO(Tarek): Use stdint
 
 #include <stdio.h>
 #include <sys/types.h>
