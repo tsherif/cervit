@@ -231,21 +231,6 @@ int8_t array_caseEquals(char* array1, int32_t length1, char* array2, int32_t len
     return 1;
 }
 
-int32_t array_find(char* array1, int32_t length1, char* array2, int32_t length2) {
-    if (length1 < length2) {
-        return -1;
-    }
-
-    int32_t length = length1 - length2 + 1;
-    for (int32_t i = 0; i < length; ++i) {
-        if (array_equals(array1 + i, length2, array2, length2)) {
-            return i;
-        }
-    }
-
-    return length1;
-}
-
 int32_t array_skipSpace(char* array, int32_t length) {
     int32_t i = 0;
     while (i < length) {
@@ -274,6 +259,21 @@ int32_t array_skipHttpNewlines(char* array, int32_t length) {
     return i;
 }
 
+int32_t array_find(char* array1, int32_t length1, char* array2, int32_t length2) {
+    if (length1 < length2) {
+        return -1;
+    }
+
+    int32_t length = length1 - length2 + 1;
+    for (int32_t i = 0; i < length; ++i) {
+        if (array_equals(array1 + i, length2, array2, length2)) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
 int32_t array_findFromByteSet(const char* array, int32_t length, char* byteSet, int32_t count) {
     int32_t i = 0;
     while (i < length) {
@@ -286,7 +286,7 @@ int32_t array_findFromByteSet(const char* array, int32_t length, char* byteSet, 
         ++i;
     }
 
-    return length;
+    return -1;
 }
 
 int8_t array_incrementPointer(char** array, int32_t* length, int32_t increment) {
@@ -681,7 +681,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     }
 
     index = array_findFromByteSet(requestString, requestStringLength, " \t", 2);
-    if (index == requestStringLength) {
+    if (index == -1) {
         return -1;
     }
     buffer_appendFromArray(&request->method, requestString, index);
@@ -698,7 +698,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     }
 
     index = array_findFromByteSet(requestString, requestStringLength, "?# \t", 4);
-    if (index == requestStringLength) {
+    if (index == -1) {
         return -1;
     }
     buffer_appendFromArray(&request->url, requestString, index);
@@ -717,7 +717,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     }
 
     index = array_findFromByteSet(requestString, requestStringLength, " \t\r\n", 4);
-    if (index == requestStringLength) {
+    if (index == -1) {
         return -1;
     }
     buffer_appendFromArray(&request->version, requestString, index);
@@ -734,7 +734,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     }
 
     int32_t headerEnd = array_find(requestString, requestStringLength, HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER));
-    if (headerEnd == requestStringLength) {
+    if (headerEnd == -1) {
         return -1;
     }
 
@@ -753,6 +753,9 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
 
         // Start of header key
         index = array_findFromByteSet(requestString, requestStringLength, ": \t\r\n", 5);
+        if (index == -1) {
+            return -1;
+        }
         if (array_caseEquals(requestString, index, "Host", STATIC_STRING_LENGTH("Host"))) {
             hostFound = 1;
         }
@@ -775,6 +778,9 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
         }
 
         index = array_findFromByteSet(requestString, requestStringLength, HTTP_NEWLINE, STATIC_STRING_LENGTH(HTTP_NEWLINE));
+        if (index == -1) {
+            return -1;
+        } 
         if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
             return -1;
         }
@@ -845,7 +851,7 @@ void *handleRequest(void* args) {
             int32_t index = thread->requestBuffer.length > 3 ? thread->requestBuffer.length - 3 : 0;
             buffer_appendFromArray(&thread->requestBuffer, requestChunk, received);
 
-            if (array_find(thread->requestBuffer.data + index, thread->requestBuffer.length - index, HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER)) != thread->requestBuffer.length) {
+            if (array_find(thread->requestBuffer.data + index, thread->requestBuffer.length - index, HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER)) != -1) {
                 validRequest = 1;
                 break;
             } else if (received < TRANSFER_CHUNK_SIZE) {
