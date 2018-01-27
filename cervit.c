@@ -27,6 +27,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/sendfile.h>
 #include <netinet/in.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -1079,26 +1080,7 @@ void *handleRequest(void* args) {
         write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
 
         if (method == HTTP_METHOD_GET) {
-            char fileChunk[TRANSFER_CHUNK_SIZE];
-
-            int32_t i = 0;
-            while (i < fileSize) {
-                int32_t length = TRANSFER_CHUNK_SIZE;
-
-                if (i + length > fileSize) {
-                    length = fileSize - i;
-                }
-
-                int32_t numRead = read(fd, fileChunk, length);
-
-                if (numRead > 0) {
-                    i += numRead;
-                } else {
-                    break;
-                }
-
-                write(thread->connection, fileChunk, length);
-            }
+            sendfile(thread->connection, fd, 0, fileSize);
         } 
 
         close(thread->connection);
