@@ -21,8 +21,6 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ///////////////////////////////////////////////////////////////////////////////////
 
-// TODO(Tarek): Accept only \n line ending in request (RFC 2616, 19.3)
-
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -247,14 +245,48 @@ int32_t array_skipSpace(char* array, int32_t length) {
     return i;
 }
 
+int32_t array_isHttpNewline(char* array, int32_t length) {
+    if (length < 1) {
+        return 0;
+    }
+
+    if (*array == '\n') {
+        return 1;
+    }
+
+    if (length > 1 && array[0] == '\r' && array[1] == '\n') {
+        return 2;
+    }
+
+    return 0;
+}
+
+int32_t array_isHttpHeaderEnd(char* array, int32_t length) {
+    if (length < 2) {
+        return 0;
+    }
+
+    int32_t i = array_isHttpNewline(array, length);
+
+    if (i == 0) {
+        return 0;
+    }
+
+    int32_t j = array_isHttpNewline(array + i, length - i);
+
+    if (j == 0) {
+        return 0;
+    }
+
+    return i + j;
+}
+
 int32_t array_skipHttpNewlines(char* array, int32_t length) {
     int32_t i = 0;
-    while (i < length - 1) {
-        if (array[i] == '\r' && array[i + 1] == '\n') {
-            i += 2;
-        } else {
-            break;
-        }
+    int32_t count = array_isHttpNewline(array, length);
+    while (count && i < length) {
+        i += count;
+        count = array_isHttpNewline(array + i, length - i);
     }
 
     return i;
@@ -730,18 +762,26 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
         return -1;
     }
 
-    if (requestStringLength < STATIC_STRING_LENGTH(HTTP_NEWLINE) || !array_equals(requestString, STATIC_STRING_LENGTH(HTTP_NEWLINE), HTTP_NEWLINE, STATIC_STRING_LENGTH(HTTP_NEWLINE))) {
+    if (!array_isHttpNewline(requestString, requestStringLength)) {
         return -1;
     }
 
-    int32_t headerEnd = array_find(requestString, requestStringLength, HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER));
+    int32_t headerEnd = -1;
+
+    for (int32_t i = 0; i < requestStringLength; ++i) {
+        if (array_isHttpHeaderEnd(requestString + i, requestStringLength - i)) {
+            headerEnd = i;
+            break;
+        }
+    }
+
     if (headerEnd == -1) {
         return -1;
     }
 
     // Find "Host" header. Required to respond with 400 if not found (RFC 2616, 14.23)
     int8_t hostFound = 0;
-    while (!hostFound && index < (int32_t) headerEnd) {
+    while (!hostFound && index < headerEnd) {
         int32_t index = array_skipHttpNewlines(requestString, requestStringLength);
         if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
             return -1;
@@ -764,17 +804,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
             return -1;
         }
 
-        index = array_skipSpace(requestString, requestStringLength);
-        if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
-            return -1;
-        }
-
         if (*requestString != ':') {
-            return -1;
-        }
-
-        index = array_skipSpace(requestString, requestStringLength);
-        if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
             return -1;
         }
 
@@ -786,7 +816,11 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
             return -1;
         }
 
-        if (hostFound || array_equals(requestString, STATIC_STRING_LENGTH(HTTP_END_HEADER), HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER))) {
+        if (!array_isHttpNewline(requestString, requestStringLength)) {
+            return -1;
+        }
+
+        if (hostFound) {
             break;
         }
     }
@@ -852,8 +886,14 @@ void *handleRequest(void* args) {
             int32_t index = thread->requestBuffer.length > 3 ? thread->requestBuffer.length - 3 : 0;
             buffer_appendFromArray(&thread->requestBuffer, requestChunk, received);
 
-            if (array_find(thread->requestBuffer.data + index, thread->requestBuffer.length - index, HTTP_END_HEADER, STATIC_STRING_LENGTH(HTTP_END_HEADER)) != -1) {
-                validRequest = 1;
+            for (int32_t i = index; i < thread->requestBuffer.length; ++i) {
+                if (array_isHttpHeaderEnd(thread->requestBuffer.data + i, thread->requestBuffer.length - i)) {
+                    validRequest = 1;
+                    break;
+                }
+            }
+
+            if (validRequest) {
                 break;
             } else if (received < TRANSFER_CHUNK_SIZE) {
                 // Request ended without header terminator
