@@ -73,6 +73,10 @@ void exit(int status);
 #define REQUEST_MAX_SIZE (TRANSFER_CHUNK_SIZE * 4)
 #define STATIC_STRING_LENGTH(string) ((int32_t) sizeof(string) - 1)
 
+#define BYTESET_TOKEN_END " \t\r\n"
+#define BYTESET_PATH_END "?#" BYTESET_TOKEN_END
+#define BYTESET_HEADER_KEY_END ":" BYTESET_TOKEN_END
+
 const char* DAY_STRINGS[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
 const char* MONTH_STRINGS[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
@@ -84,7 +88,7 @@ typedef struct {
 
 typedef struct {
     Buffer method;
-    Buffer url;
+    Buffer path;
     Buffer version;
 } Request;
 
@@ -695,7 +699,7 @@ int32_t methodCode(Buffer* buffer) {
 
 int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     request->method.length = 0;
-    request->url.length = 0;
+    request->path.length = 0;
     request->version.length = 0;
 
     char* requestString = requestBuffer->data;
@@ -713,7 +717,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
         return -1;
     }
 
-    index = array_findFromByteSet(requestString, requestStringLength, " \t", 2);
+    index = array_findFromByteSet(requestString, requestStringLength, BYTESET_TOKEN_END, STATIC_STRING_LENGTH(BYTESET_TOKEN_END));
     if (index == -1) {
         return -1;
     }
@@ -723,25 +727,30 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
 
 
     // Get URL
-    buffer_appendFromArray(&request->url, ".", 1);
+    buffer_appendFromArray(&request->path, ".", 1);
 
     index = array_skipSpace(requestString, requestStringLength);
     if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
 
-    index = array_findFromByteSet(requestString, requestStringLength, "?# \t", 4);
+    index = array_findFromByteSet(requestString, requestStringLength, BYTESET_PATH_END, STATIC_STRING_LENGTH(BYTESET_PATH_END));
     if (index == -1) {
         return -1;
     }
-    buffer_appendFromArray(&request->url, requestString, index);
+    buffer_appendFromArray(&request->path, requestString, index);
     requestString += index;
     requestStringLength -= index;
 
-    if (buffer_URIHexDecode(&request->url) == -1) {
+    if (buffer_URIHexDecode(&request->path) == -1) {
         return -1;
     }
-    buffer_removePathDotSegments(&request->url);
+    buffer_removePathDotSegments(&request->path);
+
+    index = array_findFromByteSet(requestString, requestStringLength, BYTESET_TOKEN_END, STATIC_STRING_LENGTH(BYTESET_TOKEN_END));
+    if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
+        return -1;
+    }
 
     // HTTP version string
     index = array_skipSpace(requestString, requestStringLength);
@@ -749,7 +758,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
         return -1;
     }
 
-    index = array_findFromByteSet(requestString, requestStringLength, " \t\r\n", 4);
+    index = array_findFromByteSet(requestString, requestStringLength, BYTESET_TOKEN_END, STATIC_STRING_LENGTH(BYTESET_TOKEN_END));
     if (index == -1) {
         return -1;
     }
@@ -780,7 +789,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
         }
 
         // Start of header key
-        index = array_findFromByteSet(requestString, requestStringLength, ": \t\r\n", 5);
+        index = array_findFromByteSet(requestString, requestStringLength, BYTESET_HEADER_KEY_END, STATIC_STRING_LENGTH(BYTESET_HEADER_KEY_END));
         if (index == -1) {
             return -1;
         }
@@ -922,12 +931,11 @@ void *handleRequest(void* args) {
             continue;
         }
 
-        printf("%.*s %.*s handled by thread %d\n", (int32_t) thread->request.method.length, thread->request.method.data, (int32_t) thread->request.url.length - 1, thread->request.url.data + 1, thread->id);
+        printf("%.*s %.*s handled by thread %d\n", (int32_t) thread->request.method.length, thread->request.method.data, (int32_t) thread->request.path.length - 1, thread->request.path.data + 1, thread->id);
 
-        returnVal = buffer_statFile(&thread->request.url, &fileInfo);
+        returnVal = buffer_statFile(&thread->request.path, &fileInfo);
 
         if (returnVal == -1) {
-            perror("Failed to stat url");
             buffer_errorResponse(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
             write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);  
             close(thread->connection);
@@ -936,27 +944,27 @@ void *handleRequest(void* args) {
 
         // Handle directory
         if ((fileInfo.st_mode & S_IFMT) == S_IFDIR) {
-            if (thread->request.url.data[thread->request.url.length - 1] != '/') {
-                buffer_appendFromString(&thread->request.url, "/");
+            if (thread->request.path.data[thread->request.path.length - 1] != '/') {
+                buffer_appendFromString(&thread->request.path, "/");
             }
 
             // Try to send index.html
-            int32_t baseLength = thread->request.url.length;
-            buffer_appendFromString(&thread->request.url, "index.html");
+            int32_t baseLength = thread->request.path.length;
+            buffer_appendFromString(&thread->request.path, "index.html");
 
-            returnVal = buffer_statFile(&thread->request.url, &fileInfo);
+            returnVal = buffer_statFile(&thread->request.path, &fileInfo);
 
             // Otherwise send directory listing.
             if (returnVal == -1) {
                 thread->dirListingBuffer.length = 0;
                 thread->dirnameBuffer.length = 0;
                 thread->filenameBuffer.length = 0;
-                thread->request.url.length = baseLength;
+                thread->request.path.length = baseLength;
                 buffer_appendFromString(&thread->dirListingBuffer, "<html><body><h1>Directory listing for: ");
-                buffer_appendFromArray(&thread->dirListingBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                buffer_appendFromArray(&thread->dirListingBuffer, thread->request.path.data + 1, thread->request.path.length - 1); // Skip '.'
                 buffer_appendFromString(&thread->dirListingBuffer, "</h1><ul>\n");
 
-                DIR *dir = buffer_openDir(&thread->request.url);
+                DIR *dir = buffer_openDir(&thread->request.path);
 
                 if (!dir) {
                     perror("Failed to open directory");
@@ -980,9 +988,9 @@ void *handleRequest(void* args) {
                     }
 
                     // Remove added entry name
-                    thread->request.url.length = baseLength;
+                    thread->request.path.length = baseLength;
                     
-                    buffer_appendFromString(&thread->request.url, entry.d_name);
+                    buffer_appendFromString(&thread->request.path, entry.d_name);
 
                     if (entry.d_type == DT_DIR) {
                         buffer_appendFromString(&thread->dirnameBuffer, entry.d_name); 
@@ -1028,11 +1036,11 @@ void *handleRequest(void* args) {
                 sortNameList(directoryNames, dirCount);
                 sortNameList(filenames, fileCount);
 
-                thread->request.url.length = baseLength;
+                thread->request.path.length = baseLength;
                 
                 for (int32_t i = 0; i < dirCount; ++i) {
                     buffer_appendFromString(&thread->dirListingBuffer, "<li><a href=\"");
-                    buffer_appendFromArray(&thread->dirListingBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                    buffer_appendFromArray(&thread->dirListingBuffer, thread->request.path.data + 1, thread->request.path.length - 1); // Skip '.'
                     buffer_appendFromString(&thread->dirListingBuffer, directoryNames[i]);
                     buffer_appendFromString(&thread->dirListingBuffer, "/\">");
                     buffer_appendFromString(&thread->dirListingBuffer, directoryNames[i]);
@@ -1041,7 +1049,7 @@ void *handleRequest(void* args) {
 
                 for (int32_t i = 0; i < fileCount; ++i) {
                     buffer_appendFromString(&thread->dirListingBuffer, "<li><a href=\"");
-                    buffer_appendFromArray(&thread->dirListingBuffer, thread->request.url.data + 1, thread->request.url.length - 1); // Skip '.'
+                    buffer_appendFromArray(&thread->dirListingBuffer, thread->request.path.data + 1, thread->request.path.length - 1); // Skip '.'
                     buffer_appendFromString(&thread->dirListingBuffer, filenames[i]);
                     buffer_appendFromString(&thread->dirListingBuffer, "\">");
                     buffer_appendFromString(&thread->dirListingBuffer, filenames[i]);
@@ -1069,7 +1077,7 @@ void *handleRequest(void* args) {
             
         }
 
-        int32_t fd = buffer_openFile(&thread->request.url, O_RDONLY);
+        int32_t fd = buffer_openFile(&thread->request.path, O_RDONLY);
 
         if (fd == -1) {
             perror("Failed to open file");
@@ -1095,7 +1103,7 @@ void *handleRequest(void* args) {
         buffer_appendFromString(&thread->responseBuffer, HTTP_OK_HEADER);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CACHE_HEADERS);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_TYPE_KEY);
-        buffer_appendFromString(&thread->responseBuffer, contentTypeHeader(&thread->request.url));
+        buffer_appendFromString(&thread->responseBuffer, contentTypeHeader(&thread->request.path));
         buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_LENGTH_KEY);
         buffer_appendFromUint(&thread->responseBuffer, fileSize);
@@ -1129,7 +1137,7 @@ void onClose(void) {
         buffer_delete(&threads[i].requestBuffer);
         buffer_delete(&threads[i].responseBuffer);
         buffer_delete(&threads[i].request.method);
-        buffer_delete(&threads[i].request.url);
+        buffer_delete(&threads[i].request.path);
         buffer_delete(&threads[i].request.version);
         buffer_delete(&threads[i].dirListingBuffer);
         buffer_delete(&threads[i].dirnameBuffer);
@@ -1208,7 +1216,7 @@ int main(int argc, char** argv) {
     for (int32_t i = 0; i < numThreads; ++i) {
         threads[i].id = i;
         buffer_init(&threads[i].request.method, 16);
-        buffer_init(&threads[i].request.url, 1024);
+        buffer_init(&threads[i].request.path, 1024);
         buffer_init(&threads[i].request.version, 16);
         buffer_init(&threads[i].requestBuffer, 2048);
         buffer_init(&threads[i].responseBuffer, 1024);
