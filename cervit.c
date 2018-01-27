@@ -251,7 +251,7 @@ int8_t array_equals(char* array1, int32_t length1, char* array2, int32_t length2
     return 1;
 }
 
-// Check if two array are the same sequence of bytes, disregarding
+// Check if two arrays are the same sequence of bytes, disregarding
 // case for alphabetical values [A-Za-z].
 int8_t array_caseEquals(char* array1, int32_t length1, char* array2, int32_t length2) {
     if (length1 != length2) {
@@ -278,79 +278,6 @@ int8_t array_caseEquals(char* array1, int32_t length1, char* array2, int32_t len
     }
 
     return 1;
-}
-
-// Find the first byte in an array that isn't a space (' ') or 
-// tab('\t'), return the index.
-int32_t array_skipSpace(char* array, int32_t length) {
-    int32_t i = 0;
-    while (i < length) {
-        char c = array[i];
-
-        if (c != ' ' && c != '\t') {
-            break;
-        }
-
-        ++i;
-    }
-
-    return i;
-}
-
-// Check if the beginning of the array is an acceptable
-// HTTP newline, '\r\n' or '\n' (RFC 7230, 3.5). If so,
-// return the number of characters that make up the newline,
-// else return 0.
-int32_t array_isHttpNewline(char* array, int32_t length) {
-    if (length < 1) {
-        return 0;
-    }
-
-    if (*array == '\n') {
-        return 1;
-    }
-
-    if (length > 1 && array[0] == '\r' && array[1] == '\n') {
-        return 2;
-    }
-
-    return 0;
-}
-
-// Check if the beginning of the array is an acceptable
-// pair of HTTP newlines. If so, return the number of 
-// characters that make up the newline pair, else return
-// 0.
-int32_t array_isHttpHeaderEnd(char* array, int32_t length) {
-    if (length < 2) {
-        return 0;
-    }
-
-    int32_t i = array_isHttpNewline(array, length);
-
-    if (i == 0) {
-        return 0;
-    }
-
-    int32_t j = array_isHttpNewline(array + i, length - i);
-
-    if (j == 0) {
-        return 0;
-    }
-
-    return i + j;
-}
-
-// Skip over any leading HTTP newlines
-int32_t array_skipHttpNewlines(char* array, int32_t length) {
-    int32_t i = 0;
-    int32_t count = array_isHttpNewline(array, length);
-    while (count && i < length) {
-        i += count;
-        count = array_isHttpNewline(array + i, length - i);
-    }
-
-    return i;
 }
 
 // Find if array2 exists as a subarray of array1. If so, return index,
@@ -487,9 +414,137 @@ void buffer_appendFromUint(Buffer* buffer, uint32_t n) {
     buffer_appendFromArray(buffer, result, length);
 }
 
+// Append the current date and time (GMT)
+// to the buffer.
+void buffer_appendDate(Buffer* buffer) {
+    time_t t = time(NULL);
+    struct tm date;
+    gmtime_r(&t, &date);
+
+    buffer_checkAllocation(buffer, buffer->length + 29);
+
+    buffer_appendFromString(buffer, DAY_STRINGS[date.tm_wday]);
+    buffer_appendFromString(buffer, ", ");
+    buffer_appendFromUint(buffer, date.tm_mday);
+    buffer_appendFromString(buffer, " ");
+    buffer_appendFromString(buffer, MONTH_STRINGS[date.tm_mon]);
+    buffer_appendFromString(buffer, " ");
+    buffer_appendFromUint(buffer, date.tm_year + 1900);
+    buffer_appendFromString(buffer, " ");
+
+    if (date.tm_hour < 10) {
+        buffer_appendFromString(buffer, "0");
+    }
+    buffer_appendFromUint(buffer, date.tm_hour);
+    buffer_appendFromString(buffer, ":");
+
+    if (date.tm_min < 10) {
+        buffer_appendFromString(buffer, "0");
+    }
+    buffer_appendFromUint(buffer, date.tm_min);
+    buffer_appendFromString(buffer, ":"); 
+
+    if (date.tm_sec < 10) {
+        buffer_appendFromString(buffer, "0");
+    }
+    buffer_appendFromUint(buffer, date.tm_sec);
+
+    buffer_appendFromString(buffer, " GMT"); 
+}
+
+// If buffer isn't currently null-terminated, add null
+// in first unused byte. Useful when interacting
+// with system calls that expect null-termination.
+void buffer_externalNull(Buffer* buffer) {
+    // If buffer isn't currently null-terminated, add null
+    // in first unused byte for the read.
+    if (buffer->data[buffer->length - 1] != '\0') {
+        buffer_checkAllocation(buffer, buffer->length + 1);
+        buffer->data[buffer->length] = '\0';
+    }
+}
+
+
+/////////////////////
+// UTILITY FUNCTIONS
+/////////////////////
+
+// Find the first byte in an array that isn't a space (' ') or 
+// tab('\t'), return the index.
+int32_t skipArraySpaces(char* array, int32_t length) {
+    int32_t i = 0;
+    while (i < length) {
+        char c = array[i];
+
+        if (c != ' ' && c != '\t') {
+            break;
+        }
+
+        ++i;
+    }
+
+    return i;
+}
+
+// Check if the beginning of the array is an acceptable
+// HTTP newline, '\r\n' or '\n' (RFC 7230, 3.5). If so,
+// return the number of characters that make up the newline,
+// else return 0.
+int32_t isArrayHttpNewline(char* array, int32_t length) {
+    if (length < 1) {
+        return 0;
+    }
+
+    if (*array == '\n') {
+        return 1;
+    }
+
+    if (length > 1 && array[0] == '\r' && array[1] == '\n') {
+        return 2;
+    }
+
+    return 0;
+}
+
+// Check if the beginning of the array is an acceptable
+// pair of HTTP newlines. If so, return the number of 
+// characters that make up the newline pair, else return
+// 0.
+int32_t isArrayHttpHeaderEnd(char* array, int32_t length) {
+    if (length < 2) {
+        return 0;
+    }
+
+    int32_t i = isArrayHttpNewline(array, length);
+
+    if (i == 0) {
+        return 0;
+    }
+
+    int32_t j = isArrayHttpNewline(array + i, length - i);
+
+    if (j == 0) {
+        return 0;
+    }
+
+    return i + j;
+}
+
+// Skip over any leading HTTP newlines
+int32_t skipArrayHttpNewlines(char* array, int32_t length) {
+    int32_t i = 0;
+    int32_t count = isArrayHttpNewline(array, length);
+    while (count && i < length) {
+        i += count;
+        count = isArrayHttpNewline(array + i, length - i);
+    }
+
+    return i;
+}
+
 // Decode any percent-encoded characters
 // from the buffer.
-int8_t buffer_URIHexDecode(Buffer* buffer) {
+int8_t hexDecodeBuffer(Buffer* buffer) {
     char* path = buffer->data;
     int32_t length = buffer->length;
     
@@ -523,8 +578,8 @@ int8_t buffer_URIHexDecode(Buffer* buffer) {
     return 0;
 }
 
-// Remove path '.' and '..' from a path.
-void buffer_removePathDotSegments(Buffer* buffer) {
+// Remove path '.' and '..' from a path. (RFC 3986, 5.3.4)
+void removeBufferDotSegments(Buffer* buffer) {
     // Skip ./ prefix
     char* path = buffer->data + 2;
     int32_t length = buffer-> length - 2;
@@ -586,47 +641,9 @@ void buffer_removePathDotSegments(Buffer* buffer) {
     buffer->length = writeIndex + 2;
 }
 
-// Append the current date and time (GMT)
-// to the buffer.
-void buffer_appendDate(Buffer* buffer) {
-    time_t t = time(NULL);
-    struct tm date;
-    gmtime_r(&t, &date);
-
-    buffer_checkAllocation(buffer, buffer->length + 29);
-
-    buffer_appendFromString(buffer, DAY_STRINGS[date.tm_wday]);
-    buffer_appendFromString(buffer, ", ");
-    buffer_appendFromUint(buffer, date.tm_mday);
-    buffer_appendFromString(buffer, " ");
-    buffer_appendFromString(buffer, MONTH_STRINGS[date.tm_mon]);
-    buffer_appendFromString(buffer, " ");
-    buffer_appendFromUint(buffer, date.tm_year + 1900);
-    buffer_appendFromString(buffer, " ");
-
-    if (date.tm_hour < 10) {
-        buffer_appendFromString(buffer, "0");
-    }
-    buffer_appendFromUint(buffer, date.tm_hour);
-    buffer_appendFromString(buffer, ":");
-
-    if (date.tm_min < 10) {
-        buffer_appendFromString(buffer, "0");
-    }
-    buffer_appendFromUint(buffer, date.tm_min);
-    buffer_appendFromString(buffer, ":"); 
-
-    if (date.tm_sec < 10) {
-        buffer_appendFromString(buffer, "0");
-    }
-    buffer_appendFromUint(buffer, date.tm_sec);
-
-    buffer_appendFromString(buffer, " GMT"); 
-}
-
 // Set the buffer's contents to an error response base on the 
 // given headers and body.
-void buffer_errorResponse(Buffer* buffer, const char* headers, const char* body) {
+void errorResponseBuffer(Buffer* buffer, const char* headers, const char* body) {
     buffer->length = 0;
 
     buffer_appendFromString(buffer, headers);
@@ -636,34 +653,22 @@ void buffer_errorResponse(Buffer* buffer, const char* headers, const char* body)
     buffer_appendFromString(buffer, body);
 }
 
-// If buffer isn't currently null-terminated, add null
-// in first unused byte. Useful when interacting
-// with system calls that expect null-termination.
-void buffer_externalNull(Buffer* buffer) {
-    // If buffer isn't currently null-terminated, add null
-    // in first unused byte for the read.
-    if (buffer->data[buffer->length - 1] != '\0') {
-        buffer_checkAllocation(buffer, buffer->length + 1);
-        buffer->data[buffer->length] = '\0';
-    }
-}
-
 // Open file whose name is stored in buffer.
-int32_t buffer_openFile(Buffer* buffer, int32_t flags) {
+int32_t openFileFromBuffer(Buffer* buffer, int32_t flags) {
     buffer_externalNull(buffer);
 
     return open(buffer->data, flags);
 }
 
 // Stat file whose name is stored in buffer.
-int32_t buffer_statFile(Buffer* buffer, struct stat *fileInfo) {
+int32_t statFileFromBuffer(Buffer* buffer, struct stat *fileInfo) {
     buffer_externalNull(buffer);
 
     return stat(buffer->data, fileInfo);
 }
 
 // Open directory whose name is stored in buffer.
-DIR* buffer_openDir(Buffer* buffer) {
+DIR* openDirFromBuffer(Buffer* buffer) {
     buffer_externalNull(buffer);
 
     return opendir(buffer->data);
@@ -671,7 +676,7 @@ DIR* buffer_openDir(Buffer* buffer) {
 
 // Guess at content stype based on file extension
 // of file name stored in filename.
-char *contentTypeHeader(Buffer* filename) {
+char *contentTypeFromBuffer(Buffer* filename) {
     int32_t offset = filename->length - 1;
     
     while (offset > 0 && filename->data[offset] != '.') {
@@ -798,13 +803,13 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     int32_t requestStringLength = requestBuffer->length;
 
     // Skip leading newlines
-    int32_t index = array_skipHttpNewlines(requestString, requestStringLength);
+    int32_t index = skipArrayHttpNewlines(requestString, requestStringLength);
     if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
 
     // Get method
-    index = array_skipSpace(requestString, requestStringLength);
+    index = skipArraySpaces(requestString, requestStringLength);
     if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
@@ -821,7 +826,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     // Get URL
     buffer_appendFromArray(&request->path, ".", 1);
 
-    index = array_skipSpace(requestString, requestStringLength);
+    index = skipArraySpaces(requestString, requestStringLength);
     if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
@@ -834,10 +839,10 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     requestString += index;
     requestStringLength -= index;
 
-    if (buffer_URIHexDecode(&request->path) == -1) {
+    if (hexDecodeBuffer(&request->path) == -1) {
         return -1;
     }
-    buffer_removePathDotSegments(&request->path);
+    removeBufferDotSegments(&request->path);
 
     index = array_findFromByteSet(requestString, requestStringLength, BYTESET_TOKEN_END, STATIC_STRING_LENGTH(BYTESET_TOKEN_END));
     if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
@@ -845,7 +850,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     }
 
     // HTTP version string
-    index = array_skipSpace(requestString, requestStringLength);
+    index = skipArraySpaces(requestString, requestStringLength);
     if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
@@ -858,24 +863,24 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     requestString += index;
     requestStringLength -= index;
 
-    index = array_skipSpace(requestString, requestStringLength);
+    index = skipArraySpaces(requestString, requestStringLength);
     if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
 
-    if (!array_isHttpNewline(requestString, requestStringLength)) {
+    if (!isArrayHttpNewline(requestString, requestStringLength)) {
         return -1;
     }
 
     // Find "Host" header. Required to respond with 400 if not found (RFC 2616, 14.23)
     int8_t hostFound = 0;
     while (!hostFound && index < requestStringLength) {
-        int32_t index = array_skipHttpNewlines(requestString, requestStringLength);
+        int32_t index = skipArrayHttpNewlines(requestString, requestStringLength);
         if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
             return -1;
         }
 
-        index = array_skipSpace(requestString, requestStringLength);
+        index = skipArraySpaces(requestString, requestStringLength);
         if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
             return -1;
         }
@@ -904,11 +909,11 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
             return -1;
         }
 
-        if (!array_isHttpNewline(requestString, requestStringLength)) {
+        if (!isArrayHttpNewline(requestString, requestStringLength)) {
             return -1;
         }
 
-        if (hostFound || array_isHttpHeaderEnd(requestString, requestStringLength)) {
+        if (hostFound || isArrayHttpHeaderEnd(requestString, requestStringLength)) {
             break;
         }
     }
@@ -922,7 +927,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
 
 // Sort a list of strings. Used for directory 
 // listing responses.
-void sortNameList(char** list, int32_t length) {
+void sortStringList(char** list, int32_t length) {
     char *current;
     for (int32_t i = 1; i < length; ++i) {
         current = list[i];
@@ -939,8 +944,9 @@ void sortNameList(char** list, int32_t length) {
     }
 }
 
-// Main thread function to handle incoming
-// requests.
+////////////////////////
+// MAIN THREAD FUNCTION
+////////////////////////
 void *handleRequest(void* args) {
     Thread* thread = (Thread*) args;
 
@@ -982,7 +988,7 @@ void *handleRequest(void* args) {
             buffer_appendFromArray(&thread->requestBuffer, requestChunk, received);
 
             for (int32_t i = index; i < thread->requestBuffer.length; ++i) {
-                if (array_isHttpHeaderEnd(thread->requestBuffer.data + i, thread->requestBuffer.length - i)) {
+                if (isArrayHttpHeaderEnd(thread->requestBuffer.data + i, thread->requestBuffer.length - i)) {
                     validRequest = 1;
                     break;
                 }
@@ -992,12 +998,12 @@ void *handleRequest(void* args) {
                 break;
             } else if (received < TRANSFER_CHUNK_SIZE) {
                 // Request ended without header terminator
-                buffer_errorResponse(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
+                errorResponseBuffer(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
                 write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
                 break;
             } else if (thread->requestBuffer.length > REQUEST_MAX_SIZE) {
                 // Request is too big.
-                buffer_errorResponse(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
+                errorResponseBuffer(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
                 write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
                 break;
             }
@@ -1011,7 +1017,7 @@ void *handleRequest(void* args) {
 
         // Parse request string into request struct.
         if (parseRequest(&thread->requestBuffer, &thread->request) == -1) {
-            buffer_errorResponse(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
+            errorResponseBuffer(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
             write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
             close(thread->connection);
             continue;
@@ -1019,7 +1025,7 @@ void *handleRequest(void* args) {
 
         method = methodCode(&thread->request.method);
         if (method == HTTP_METHOD_UNSUPPORTED) {
-            buffer_errorResponse(&thread->responseBuffer, METHOD_NOT_SUPPORTED_HEADERS, METHOD_NOT_SUPPORTED_BODY);
+            errorResponseBuffer(&thread->responseBuffer, METHOD_NOT_SUPPORTED_HEADERS, METHOD_NOT_SUPPORTED_BODY);
             write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
             close(thread->connection);
             continue;
@@ -1027,7 +1033,7 @@ void *handleRequest(void* args) {
 
         // We only support HTTP 1.1
         if (!array_caseEquals(thread->request.version.data, thread->request.version.length, HTTP_1_1_VERSION, STATIC_STRING_LENGTH(HTTP_1_1_VERSION))) {
-            buffer_errorResponse(&thread->responseBuffer, VERSION_NOT_SUPPORTED_HEADERS, VERSION_NOT_SUPPORTED_BODY);
+            errorResponseBuffer(&thread->responseBuffer, VERSION_NOT_SUPPORTED_HEADERS, VERSION_NOT_SUPPORTED_BODY);
             write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
             close(thread->connection);
             continue;
@@ -1035,8 +1041,8 @@ void *handleRequest(void* args) {
 
         printf("%.*s %.*s handled by thread %d\n", (int32_t) thread->request.method.length, thread->request.method.data, (int32_t) thread->request.path.length - 1, thread->request.path.data + 1, thread->id);
 
-        if (buffer_statFile(&thread->request.path, &fileInfo) == -1) {
-            buffer_errorResponse(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
+        if (statFileFromBuffer(&thread->request.path, &fileInfo) == -1) {
+            errorResponseBuffer(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
             write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);  
             close(thread->connection);
             continue;
@@ -1054,7 +1060,7 @@ void *handleRequest(void* args) {
             buffer_appendFromString(&thread->request.path, "index.html");
 
             // Otherwise send directory listing.
-            if (buffer_statFile(&thread->request.path, &fileInfo) == -1) {
+            if (statFileFromBuffer(&thread->request.path, &fileInfo) == -1) {
                 thread->dirListingBuffer.length = 0;
                 thread->dirnameBuffer.length = 0;
                 thread->filenameBuffer.length = 0;
@@ -1063,11 +1069,11 @@ void *handleRequest(void* args) {
                 buffer_appendFromArray(&thread->dirListingBuffer, thread->request.path.data + 1, thread->request.path.length - 1); // Skip '.'
                 buffer_appendFromString(&thread->dirListingBuffer, "</h1><ul>\n");
 
-                DIR *dir = buffer_openDir(&thread->request.path);
+                DIR *dir = openDirFromBuffer(&thread->request.path);
 
                 if (!dir) {
                     perror("Failed to open directory");
-                    buffer_errorResponse(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
+                    errorResponseBuffer(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
                     write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length); 
                     close(thread->connection);
                     continue;
@@ -1139,8 +1145,8 @@ void *handleRequest(void* args) {
                 }
 
                 // Sort the two lists.
-                sortNameList(directoryNames, dirCount);
-                sortNameList(filenames, fileCount);
+                sortStringList(directoryNames, dirCount);
+                sortStringList(filenames, fileCount);
 
                 // Reset path again for display.
                 thread->request.path.length = baseLength;
@@ -1193,11 +1199,11 @@ void *handleRequest(void* args) {
 
         // We're trying to send a file. Should exist since it was
         // stated above.
-        int32_t fd = buffer_openFile(&thread->request.path, O_RDONLY);
+        int32_t fd = openFileFromBuffer(&thread->request.path, O_RDONLY);
 
         if (fd == -1) {
             perror("Failed to open file");
-            buffer_errorResponse(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
+            errorResponseBuffer(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
             write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
             close(thread->connection);
             continue; 
@@ -1207,7 +1213,7 @@ void *handleRequest(void* args) {
         buffer_appendFromString(&thread->responseBuffer, HTTP_OK_HEADER);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CACHE_HEADERS);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_TYPE_KEY);
-        buffer_appendFromString(&thread->responseBuffer, contentTypeHeader(&thread->request.path));
+        buffer_appendFromString(&thread->responseBuffer, contentTypeFromBuffer(&thread->request.path));
         buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_LENGTH_KEY);
         buffer_appendFromUint(&thread->responseBuffer, fileInfo.st_size);
