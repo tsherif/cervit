@@ -953,6 +953,7 @@ void *handleRequest(void* args) {
         thread->responseBuffer.length = 0;
 
         // Communication with main thread.
+        // Get accecpted connection socket.
         pthread_mutex_lock(&currentConnectionLock);
         while(!currentConnectionWriteDone) {
             pthread_cond_wait(&currentConnectionWritten, &currentConnectionLock);
@@ -963,6 +964,8 @@ void *handleRequest(void* args) {
         pthread_mutex_unlock(&currentConnectionLock);
         pthread_cond_signal(&currentConnectionRead);
 
+        // Read request stream into a buffer. Read in chunks of TRANSFER_CHUNK_SIZE.
+        // Since we only accept GET and HEAD requests, just read up to first double newline.
         char validRequest = 0;
         while(1) {
             int32_t received = recv(thread->connection, requestChunk, TRANSFER_CHUNK_SIZE, 0);
@@ -972,7 +975,9 @@ void *handleRequest(void* args) {
                 break;
             }
 
-            // In case it's split between chunks.
+            // See if we've found the end of the headers.
+            // Start search a little ways into the previous 
+            // chunk in case double newline is split between chunks.
             int32_t index = thread->requestBuffer.length > 3 ? thread->requestBuffer.length - 3 : 0;
             buffer_appendFromArray(&thread->requestBuffer, requestChunk, received);
 
@@ -991,17 +996,20 @@ void *handleRequest(void* args) {
                 write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
                 break;
             } else if (thread->requestBuffer.length > REQUEST_MAX_SIZE) {
+                // Request is too big.
                 buffer_errorResponse(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
                 write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
                 break;
             }
         }
 
+        // Wasn't a valid HTTP request
         if (!validRequest) {
             close(thread->connection);
             continue;
         }
 
+        // Parse request string into request struct.
         if (parseRequest(&thread->requestBuffer, &thread->request) == -1) {
             buffer_errorResponse(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
             write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
@@ -1010,7 +1018,6 @@ void *handleRequest(void* args) {
         }
 
         method = methodCode(&thread->request.method);
-
         if (method == HTTP_METHOD_UNSUPPORTED) {
             buffer_errorResponse(&thread->responseBuffer, METHOD_NOT_SUPPORTED_HEADERS, METHOD_NOT_SUPPORTED_BODY);
             write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
@@ -1018,6 +1025,7 @@ void *handleRequest(void* args) {
             continue;
         }
 
+        // We only support HTTP 1.1
         if (!array_caseEquals(thread->request.version.data, thread->request.version.length, HTTP_1_1_VERSION, STATIC_STRING_LENGTH(HTTP_1_1_VERSION))) {
             buffer_errorResponse(&thread->responseBuffer, VERSION_NOT_SUPPORTED_HEADERS, VERSION_NOT_SUPPORTED_BODY);
             write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
@@ -1040,7 +1048,8 @@ void *handleRequest(void* args) {
                 buffer_appendFromString(&thread->request.path, "/");
             }
 
-            // Try to send index.html
+            // Try to send index.html. Keep track of length of original path
+            // in case this doesn't work.
             int32_t baseLength = thread->request.path.length;
             buffer_appendFromString(&thread->request.path, "index.html");
 
@@ -1077,11 +1086,14 @@ void *handleRequest(void* args) {
                         continue;
                     }
 
-                    // Remove added entry name
+                    // Reset to original path, i.e. get rid of
+                    // name from last iteration of loop.
                     thread->request.path.length = baseLength;
                     
                     buffer_appendFromString(&thread->request.path, entry.d_name);
 
+                    // Separate directory and file listings. Names of each
+                    // are kept in a single buffer, separated by null characters.
                     if (entry.d_type == DT_DIR) {
                         buffer_appendFromString(&thread->dirnameBuffer, entry.d_name); 
                         buffer_appendFromArray(&thread->dirnameBuffer, "", 1); 
@@ -1095,6 +1107,9 @@ void *handleRequest(void* args) {
                     readdir_r(dir, &entry, &entryp);
                 }
 
+                // Here we set up pointers to the begine of each name
+                // two buffers of file and directory names. We'll
+                // sort pointers to arrange the listing alphabetically.
                 char* directoryNames[dirCount];
                 char* filenames[fileCount];
                 int32_t currentFile = 1;
@@ -1123,11 +1138,14 @@ void *handleRequest(void* args) {
                     ++current;
                 }
 
+                // Sort the two lists.
                 sortNameList(directoryNames, dirCount);
                 sortNameList(filenames, fileCount);
 
+                // Reset path again for display.
                 thread->request.path.length = baseLength;
                 
+                // List directories.
                 for (int32_t i = 0; i < dirCount; ++i) {
                     buffer_appendFromString(&thread->dirListingBuffer, "<li><a href=\"");
                     buffer_appendFromArray(&thread->dirListingBuffer, thread->request.path.data + 1, thread->request.path.length - 1); // Skip '.'
@@ -1137,6 +1155,7 @@ void *handleRequest(void* args) {
                     buffer_appendFromString(&thread->dirListingBuffer, "/</a></li>\n");
                 }
 
+                // List files.
                 for (int32_t i = 0; i < fileCount; ++i) {
                     buffer_appendFromString(&thread->dirListingBuffer, "<li><a href=\"");
                     buffer_appendFromArray(&thread->dirListingBuffer, thread->request.path.data + 1, thread->request.path.length - 1); // Skip '.'
@@ -1147,6 +1166,7 @@ void *handleRequest(void* args) {
                 }
                 buffer_appendFromString(&thread->dirListingBuffer, "</ul></body></html>\n");
                 
+                // Prepare response headers.
                 buffer_appendFromString(&thread->responseBuffer, HTTP_OK_HEADER HTTP_CACHE_HEADERS "Content-Type: text/html" HTTP_NEWLINE);
                 buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_LENGTH_KEY);
                 buffer_appendFromUint(&thread->responseBuffer, thread->dirListingBuffer.length);
@@ -1155,18 +1175,24 @@ void *handleRequest(void* args) {
                 buffer_appendDate(&thread->responseBuffer);
                 buffer_appendFromString(&thread->responseBuffer, HTTP_END_HEADER);
 
+                // Append listing if we got a GET request.
                 if (method == HTTP_METHOD_GET) {
                     buffer_appendFromArray(&thread->responseBuffer, thread->dirListingBuffer.data, thread->dirListingBuffer.length);
                 }
 
+                // Send response.
                 write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);  
+                
+                // Clean up.
                 close(thread->connection);
                 closedir(dir);
                 continue;
             }
             
-        }
+        } // End of directory handling.
 
+        // We're trying to send a file. Should exist since it was
+        // stated above.
         int32_t fd = buffer_openFile(&thread->request.path, O_RDONLY);
 
         if (fd == -1) {
@@ -1177,26 +1203,28 @@ void *handleRequest(void* args) {
             continue; 
         }
 
-        int32_t fileSize = fileInfo.st_size;
-
+        // Prepare response headers.
         buffer_appendFromString(&thread->responseBuffer, HTTP_OK_HEADER);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CACHE_HEADERS);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_TYPE_KEY);
         buffer_appendFromString(&thread->responseBuffer, contentTypeHeader(&thread->request.path));
         buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_LENGTH_KEY);
-        buffer_appendFromUint(&thread->responseBuffer, fileSize);
+        buffer_appendFromUint(&thread->responseBuffer, fileInfo.st_size);
         buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE);
         buffer_appendFromString(&thread->responseBuffer, HTTP_DATE_KEY);
         buffer_appendDate(&thread->responseBuffer);
         buffer_appendFromString(&thread->responseBuffer, HTTP_END_HEADER);
         
+        // Send response headers.
         write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
 
+        // If we got a GET request, send file.
         if (method == HTTP_METHOD_GET) {
-            sendfile(thread->connection, fd, 0, fileSize);
+            sendfile(thread->connection, fd, 0, fileInfo.st_size);
         } 
 
+        // Clean up.
         close(thread->connection);
         close(fd);
     }
