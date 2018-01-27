@@ -77,6 +77,12 @@ void exit(int status);
 #define BYTESET_PATH_END "?#" BYTESET_TOKEN_END
 #define BYTESET_HEADER_KEY_END ":" BYTESET_TOKEN_END
 
+#ifdef _SC_NPROCESSORS_ONLN
+#define NUM_THREADS sysconf(_SC_NPROCESSORS_ONLN)
+#else
+#define NUM_THREADS 4
+#endif
+
 const char* DAY_STRINGS[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
 const char* MONTH_STRINGS[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
@@ -938,10 +944,9 @@ void sortNameList(char** list, int32_t length) {
 void *handleRequest(void* args) {
     Thread* thread = (Thread*) args;
 
-    struct stat fileInfo;
-    int32_t returnVal = 0;
-    int32_t method = 0;
     char requestChunk[TRANSFER_CHUNK_SIZE];
+    int32_t method = 0;
+    struct stat fileInfo;
 
     while(1) {
         thread->requestBuffer.length = 0;
@@ -1022,9 +1027,7 @@ void *handleRequest(void* args) {
 
         printf("%.*s %.*s handled by thread %d\n", (int32_t) thread->request.method.length, thread->request.method.data, (int32_t) thread->request.path.length - 1, thread->request.path.data + 1, thread->id);
 
-        returnVal = buffer_statFile(&thread->request.path, &fileInfo);
-
-        if (returnVal == -1) {
+        if (buffer_statFile(&thread->request.path, &fileInfo) == -1) {
             buffer_errorResponse(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
             write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);  
             close(thread->connection);
@@ -1041,10 +1044,8 @@ void *handleRequest(void* args) {
             int32_t baseLength = thread->request.path.length;
             buffer_appendFromString(&thread->request.path, "index.html");
 
-            returnVal = buffer_statFile(&thread->request.path, &fileInfo);
-
             // Otherwise send directory listing.
-            if (returnVal == -1) {
+            if (buffer_statFile(&thread->request.path, &fileInfo) == -1) {
                 thread->dirListingBuffer.length = 0;
                 thread->dirnameBuffer.length = 0;
                 thread->filenameBuffer.length = 0;
@@ -1176,17 +1177,6 @@ void *handleRequest(void* args) {
             continue; 
         }
 
-        returnVal = fstat(fd, &fileInfo);
-
-        if (returnVal == -1) {
-            perror("Failed to stat file");
-            buffer_errorResponse(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
-            write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
-            close(thread->connection);
-            close(fd);
-            continue;
-        }
-
         int32_t fileSize = fileInfo.st_size;
 
         buffer_appendFromString(&thread->responseBuffer, HTTP_OK_HEADER);
@@ -1246,15 +1236,19 @@ void onSignal(int sig) {
     exit(0);
 }
 
+/////////////////////////////
+// MAIN
+/////////////////////////////
 int main(int argc, char** argv) {
     uint32_t port = 5000;
 
-    numThreads = sysconf(_SC_NPROCESSORS_CONF);
-
+    // Figure out number of threads to use
+    numThreads = NUM_THREADS;
     if (numThreads < 1) {
-        numThreads = 1;
+        numThreads = 4;
     }
 
+    // Parse out optional port number
     if (argc > 1) {
         uint32_t argPort = string_toUint(argv[1]);
 
@@ -1265,6 +1259,7 @@ int main(int argc, char** argv) {
 
     printf("Starting cervit v" VERSION " on port %d using %d threads\n", port, numThreads);
 
+    // Set up cleanup on exit 
     atexit(onClose);
     signal(SIGINT, onSignal);
     signal(SIGQUIT, onSignal);
@@ -1323,6 +1318,7 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Create listening socket
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == -1) {
         perror("Failed to create socket");
@@ -1333,14 +1329,15 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // To prevent the socket from remaining occupied on exit.
     int32_t sockoptTrue = 1;
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &sockoptTrue, sizeof(sockoptTrue)) == -1) {
         perror("Failed to set socket options");
         return 1;
     }
 
+    // Start listening on the socket.
     struct sockaddr_in addr;
-
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port);
