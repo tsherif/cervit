@@ -781,6 +781,7 @@ char *contentTypeFromBuffer(Buffer* filename) {
     return "application/octet-stream";
 }
 
+// We only support GET and HEAD.
 int32_t methodCode(Buffer* buffer) {
     if (array_caseEquals(buffer->data, buffer->length, "GET", 3)) {
         return HTTP_METHOD_GET;
@@ -823,7 +824,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     requestStringLength -= index;
 
 
-    // Get URL
+    // Get path
     buffer_appendFromArray(&request->path, ".", 1);
 
     index = skipArraySpaces(requestString, requestStringLength);
@@ -844,6 +845,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     }
     removeBufferDotSegments(&request->path);
 
+    // Skip over query (?) and fragment (#) parts, if they exist.
     index = array_findFromByteSet(requestString, requestStringLength, BYTESET_TOKEN_END, STATIC_STRING_LENGTH(BYTESET_TOKEN_END));
     if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
@@ -872,7 +874,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
         return -1;
     }
 
-    // Find "Host" header. Required to respond with 400 if not found (RFC 2616, 14.23)
+    // Find "Host" header. Required to respond with 400 if not found (RFC 7230, 5.4)
     int8_t hostFound = 0;
     while (!hostFound && index < requestStringLength) {
         int32_t index = skipArrayHttpNewlines(requestString, requestStringLength);
@@ -885,11 +887,13 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
             return -1;
         }
 
-        // Start of header key
+        // Get header key
         index = array_findFromByteSet(requestString, requestStringLength, BYTESET_HEADER_KEY_END, STATIC_STRING_LENGTH(BYTESET_HEADER_KEY_END));
         if (index == -1) {
             return -1;
         }
+
+        // Check if it's the host header
         if (array_caseEquals(requestString, index, "Host", STATIC_STRING_LENGTH("Host"))) {
             hostFound = 1;
         }
@@ -897,10 +901,12 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
             return -1;
         }
 
+        // Colon has to come immediately after header key (RFC 7230, 3.2.4)
         if (*requestString != ':') {
             return -1;
         }
 
+        // We don't care what the header value is.
         index = array_findFromByteSet(requestString, requestStringLength, HTTP_NEWLINE, STATIC_STRING_LENGTH(HTTP_NEWLINE));
         if (index == -1) {
             return -1;
@@ -909,6 +915,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
             return -1;
         }
 
+        // Just make sure it has a proper line ending.
         if (!isArrayHttpNewline(requestString, requestStringLength)) {
             return -1;
         }
@@ -918,6 +925,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
         }
     }
 
+    // If we didn't find a "Host" header, it's a bad request
     if (!hostFound) {
         return -1;
     }
