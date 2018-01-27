@@ -80,18 +80,33 @@ void exit(int status);
 const char* DAY_STRINGS[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
 const char* MONTH_STRINGS[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
+// Dynamically allocated array.
+// .data: stored data
+// .length: number of bytes currently stored
+// .size: number of bytes allocated to the array
 typedef struct {
     char* data;
     int32_t length;
     int32_t size;
 } Buffer;
 
+// Information about the HTTP request
 typedef struct {
     Buffer method;
     Buffer path;
     Buffer version;
 } Request;
 
+// Per-thread variables
+// .thread: The pthread object
+// .request: Parsed data from the request the thread is handling
+// .requestBuffer: Buffer struct to load incoming request stream
+// .responseBuffer: Buffer struct to build response headers
+// .dirListingBuffer: Buffer struct to build a directory listing response
+// .dirnameBuffer: Buffer to hold directory names so they can be sorted
+// .filenameBuffer: Buffer to hold filenames so they can be sorted
+// .id: Id number of the thread
+// .connection: Accepted socket that the thread is handling
 typedef struct {
     pthread_t thread;
     Request request;
@@ -107,12 +122,12 @@ typedef struct {
 // The listening socket
 int32_t sock;
 
-// Unshared thread variables
+// Array of thread structs
 int32_t numThreads;
 Thread* threads;
 
 
-// Shared thread variables
+// Shared thread control objects
 int32_t currentConnection;
 pthread_mutex_t currentConnectionLock;
 pthread_cond_t currentConnectionWritten;
@@ -120,6 +135,14 @@ pthread_cond_t currentConnectionRead;
 int8_t currentConnectionWriteDone;
 int8_t currentConnectionReadDone;
 
+///////////////////////////////////////////////
+// STRINGS
+// A "string" is a null-terminated sequence
+// of bytes.
+///////////////////////////////////////////////
+
+// Count the number of characters before the 
+// first null
 int32_t string_length(const char* string) {
     int32_t length = 0;
     while (string[length] != '\0') {
@@ -129,6 +152,9 @@ int32_t string_length(const char* string) {
     return length;
 }
 
+// Compare two strings for alphabetical ordering. Result
+// < 0 means string1 comes first. Result > 0 means string
+// 2 should come first, 0 means they're the same.
 int32_t string_compare(char* string1, char* string2) {
     int32_t i = 0;
     while (string1[i] || string2[i]) {
@@ -154,6 +180,8 @@ int32_t string_compare(char* string1, char* string2) {
     return 0;
 }
 
+// Parse the character value from a string of 
+// two hexadecimal digits
 char string_parseURIHexCode(const char* string) {
     char result = 0;
     int32_t multiplier = 16;
@@ -176,6 +204,8 @@ char string_parseURIHexCode(const char* string) {
     return result;
 }
 
+// Convert a string of decimal digits
+// to a uint32_t value.
 uint32_t string_toUint(const char* string) {
     int32_t i = string_length(string) - 1;
     uint32_t multiplier = 1;
@@ -193,6 +223,14 @@ uint32_t string_toUint(const char* string) {
     return result;
 }
 
+/////////////////////////////////////////////
+// ARRAYS
+// An "array" is a sequence of bytes and a 
+// length value indicating the number 
+// characters in the sequence.
+/////////////////////////////////////////////
+
+// Check if two array are the same sequence of bytes.
 int8_t array_equals(char* array1, int32_t length1, char* array2, int32_t length2) {
     if (length1 != length2) {
         return 0;
@@ -207,6 +245,8 @@ int8_t array_equals(char* array1, int32_t length1, char* array2, int32_t length2
     return 1;
 }
 
+// Check if two array are the same sequence of bytes, disregarding
+// case for alphabetical values [A-Za-z].
 int8_t array_caseEquals(char* array1, int32_t length1, char* array2, int32_t length2) {
     if (length1 != length2) {
         return 0;
@@ -234,6 +274,8 @@ int8_t array_caseEquals(char* array1, int32_t length1, char* array2, int32_t len
     return 1;
 }
 
+// Find the first byte in an array that isn't a space (' ') or 
+// tab('\t'), return the index.
 int32_t array_skipSpace(char* array, int32_t length) {
     int32_t i = 0;
     while (i < length) {
@@ -249,6 +291,10 @@ int32_t array_skipSpace(char* array, int32_t length) {
     return i;
 }
 
+// Check if the beginning of the array is an acceptable
+// HTTP newline, '\r\n' or '\n' (RFC 7230, 3.5). If so,
+// return the number of characters that make up the newline,
+// else return 0.
 int32_t array_isHttpNewline(char* array, int32_t length) {
     if (length < 1) {
         return 0;
@@ -265,6 +311,10 @@ int32_t array_isHttpNewline(char* array, int32_t length) {
     return 0;
 }
 
+// Check if the beginning of the array is an acceptable
+// pair of HTTP newlines. If so, return the number of 
+// characters that make up the newline pair, else return
+// 0.
 int32_t array_isHttpHeaderEnd(char* array, int32_t length) {
     if (length < 2) {
         return 0;
@@ -285,6 +335,7 @@ int32_t array_isHttpHeaderEnd(char* array, int32_t length) {
     return i + j;
 }
 
+// Skip over any leading HTTP newlines
 int32_t array_skipHttpNewlines(char* array, int32_t length) {
     int32_t i = 0;
     int32_t count = array_isHttpNewline(array, length);
@@ -296,6 +347,8 @@ int32_t array_skipHttpNewlines(char* array, int32_t length) {
     return i;
 }
 
+// Find if array2 exists as a subarray of array1. If so, return index,
+// else return -1.
 int32_t array_find(char* array1, int32_t length1, char* array2, int32_t length2) {
     if (length1 < length2) {
         return -1;
@@ -311,6 +364,8 @@ int32_t array_find(char* array1, int32_t length1, char* array2, int32_t length2)
     return -1;
 }
 
+// Find first occurance in the array of any of the characters in byteSet. If found,
+// return index, else return -1.
 int32_t array_findFromByteSet(const char* array, int32_t length, char* byteSet, int32_t count) {
     int32_t i = 0;
     while (i < length) {
@@ -326,6 +381,8 @@ int32_t array_findFromByteSet(const char* array, int32_t length, char* byteSet, 
     return -1;
 }
 
+// Increment an array's pointer by increment and adjust length accordingly. If
+// succesful return 0, else return -1.
 int8_t array_incrementPointer(char** array, int32_t* length, int32_t increment) {
     if (increment >= *length) {
         return -1;
@@ -337,6 +394,14 @@ int8_t array_incrementPointer(char** array, int32_t* length, int32_t increment) 
     return 0;
 }
 
+///////////////////////////////////////////////
+// BUFFERS
+// Buffers are dynamic arrays that will
+// automatically allocate the memory required
+// to store data appended to them.
+///////////////////////////////////////////////
+
+// Initialize a buffer to the given size.
 void buffer_init(Buffer* buffer, int32_t size) {
     buffer->data = malloc(size);
     buffer->length = 0;
@@ -349,6 +414,7 @@ void buffer_init(Buffer* buffer, int32_t size) {
     buffer->size = size;
 }
 
+// Deallocate memory associated with a buffer.
 void buffer_delete(Buffer* buffer) {
     if (buffer->data == 0) {
         return;
@@ -359,6 +425,8 @@ void buffer_delete(Buffer* buffer) {
     buffer->size = 0;
 }
 
+// Check if buffer is large enough to hold the requested amount 
+// of data. If not, reallocate buffer with enough memory.
 void buffer_checkAllocation(Buffer* buffer, int32_t requestedSize) {
     if (requestedSize > buffer->size) {
         int32_t newSize = buffer->size;
@@ -376,16 +444,20 @@ void buffer_checkAllocation(Buffer* buffer, int32_t requestedSize) {
     }
 }
 
+// Append bytes from array to end of buffer.
 void buffer_appendFromArray(Buffer* buffer, const char* array, int32_t length) {
     buffer_checkAllocation(buffer, buffer->length + length);
     memcpy(buffer->data + buffer->length, array, length);
     buffer->length += length;
 }
 
+// Append non-null bytes from string to end of buffer.
 void buffer_appendFromString(Buffer* buffer, const char* string) {
     buffer_appendFromArray(buffer, string, string_length(string));
 }
 
+// Convert unsigned int to array of digit characters
+// and append to end of buffer.
 void buffer_appendFromUint(Buffer* buffer, uint32_t n) {
     uint32_t pow = 1;
     uint32_t length = 1;
@@ -409,6 +481,8 @@ void buffer_appendFromUint(Buffer* buffer, uint32_t n) {
     buffer_appendFromArray(buffer, result, length);
 }
 
+// Decode any percent-encoded characters
+// from the buffer.
 int8_t buffer_URIHexDecode(Buffer* buffer) {
     char* path = buffer->data;
     int32_t length = buffer->length;
@@ -443,6 +517,7 @@ int8_t buffer_URIHexDecode(Buffer* buffer) {
     return 0;
 }
 
+// Remove path '.' and '..' from a path.
 void buffer_removePathDotSegments(Buffer* buffer) {
     // Skip ./ prefix
     char* path = buffer->data + 2;
@@ -505,6 +580,8 @@ void buffer_removePathDotSegments(Buffer* buffer) {
     buffer->length = writeIndex + 2;
 }
 
+// Append the current date and time (GMT)
+// to the buffer.
 void buffer_appendDate(Buffer* buffer) {
     time_t t = time(NULL);
     struct tm date;
@@ -541,6 +618,8 @@ void buffer_appendDate(Buffer* buffer) {
     buffer_appendFromString(buffer, " GMT"); 
 }
 
+// Set the buffer's contents to an error response base on the 
+// given headers and body.
 void buffer_errorResponse(Buffer* buffer, const char* headers, const char* body) {
     buffer->length = 0;
 
@@ -552,7 +631,8 @@ void buffer_errorResponse(Buffer* buffer, const char* headers, const char* body)
 }
 
 // If buffer isn't currently null-terminated, add null
-// in first unused byte.
+// in first unused byte. Useful when interacting
+// with system calls that expect null-termination.
 void buffer_externalNull(Buffer* buffer) {
     // If buffer isn't currently null-terminated, add null
     // in first unused byte for the read.
@@ -562,24 +642,29 @@ void buffer_externalNull(Buffer* buffer) {
     }
 }
 
+// Open file whose name is stored in buffer.
 int32_t buffer_openFile(Buffer* buffer, int32_t flags) {
     buffer_externalNull(buffer);
 
     return open(buffer->data, flags);
 }
 
+// Stat file whose name is stored in buffer.
 int32_t buffer_statFile(Buffer* buffer, struct stat *fileInfo) {
     buffer_externalNull(buffer);
 
     return stat(buffer->data, fileInfo);
 }
 
+// Open directory whose name is stored in buffer.
 DIR* buffer_openDir(Buffer* buffer) {
     buffer_externalNull(buffer);
 
     return opendir(buffer->data);
 }
 
+// Guess at content stype based on file extension
+// of file name stored in filename.
 char *contentTypeHeader(Buffer* filename) {
     int32_t offset = filename->length - 1;
     
@@ -697,6 +782,7 @@ int32_t methodCode(Buffer* buffer) {
     return HTTP_METHOD_UNSUPPORTED;
 }
 
+// Validate and parse the incoming request string.
 int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     request->method.length = 0;
     request->path.length = 0;
@@ -828,6 +914,8 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
     return 0;
 }
 
+// Sort a list of strings. Used for directory 
+// listing responses.
 void sortNameList(char** list, int32_t length) {
     char *current;
     for (int32_t i = 1; i < length; ++i) {
@@ -845,7 +933,8 @@ void sortNameList(char** list, int32_t length) {
     }
 }
 
-// Thread main function
+// Main thread function to handle incoming
+// requests.
 void *handleRequest(void* args) {
     Thread* thread = (Thread*) args;
 
@@ -1123,6 +1212,8 @@ void *handleRequest(void* args) {
     }
 }
 
+// Close sockets, free memory, destroy thread
+// control objects on process exit.
 void onClose(void) {
     pthread_mutex_destroy(&currentConnectionLock);
     pthread_cond_destroy(&currentConnectionWritten);
@@ -1149,6 +1240,8 @@ void onClose(void) {
     close(sock);
 }
 
+// Ensure cleanup happens when we get 
+// signal that stops the process.
 void onSignal(int sig) {
     exit(0);
 }
