@@ -1,7 +1,7 @@
 cervit
 ======
 
-Simple multi-threaded POSIX HTTP server written in C using only system libraries.
+A minimal multi-threaded POSIX HTTP server for local web development, written in C using only system libraries.
 
 Build:
 
