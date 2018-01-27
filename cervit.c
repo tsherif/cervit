@@ -766,22 +766,9 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
         return -1;
     }
 
-    int32_t headerEnd = -1;
-
-    for (int32_t i = 0; i < requestStringLength; ++i) {
-        if (array_isHttpHeaderEnd(requestString + i, requestStringLength - i)) {
-            headerEnd = i;
-            break;
-        }
-    }
-
-    if (headerEnd == -1) {
-        return -1;
-    }
-
     // Find "Host" header. Required to respond with 400 if not found (RFC 2616, 14.23)
     int8_t hostFound = 0;
-    while (!hostFound && index < headerEnd) {
+    while (!hostFound && index < requestStringLength) {
         int32_t index = array_skipHttpNewlines(requestString, requestStringLength);
         if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
             return -1;
@@ -820,7 +807,7 @@ int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
             return -1;
         }
 
-        if (hostFound) {
+        if (hostFound || array_isHttpHeaderEnd(requestString, requestStringLength)) {
             break;
         }
     }
