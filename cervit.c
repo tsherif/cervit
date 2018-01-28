@@ -465,9 +465,9 @@ void buffer_externalNull(Buffer* buffer) {
 }
 
 
-/////////////////////
-// UTILITY FUNCTIONS
-/////////////////////
+/////////////////////////////////
+// PARSING UTILITY FUNCTIONS
+/////////////////////////////////
 
 // Find the first byte in an array that isn't a space (' ') or 
 // tab('\t'), return the index.
@@ -782,7 +782,7 @@ char *contentTypeFromBuffer(Buffer* filename) {
 }
 
 // We only support GET and HEAD.
-int32_t methodCode(Buffer* buffer) {
+int32_t methodCodeFromBuffer(Buffer* buffer) {
     if (array_caseEquals(buffer->data, buffer->length, "GET", 3)) {
         return HTTP_METHOD_GET;
     }
@@ -795,7 +795,7 @@ int32_t methodCode(Buffer* buffer) {
 }
 
 // Validate and parse the incoming request string.
-int8_t parseRequest(const Buffer* requestBuffer, Request* request) {
+int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
     request->method.length = 0;
     request->path.length = 0;
     request->version.length = 0;
@@ -1024,14 +1024,14 @@ void *handleRequest(void* args) {
         }
 
         // Parse request string into request struct.
-        if (parseRequest(&thread->requestBuffer, &thread->request) == -1) {
+        if (parseRequestFromBuffer(&thread->requestBuffer, &thread->request) == -1) {
             errorResponseBuffer(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
             write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
             close(thread->connection);
             continue;
         }
 
-        method = methodCode(&thread->request.method);
+        method = methodCodeFromBuffer(&thread->request.method);
         if (method == HTTP_METHOD_UNSUPPORTED) {
             errorResponseBuffer(&thread->responseBuffer, METHOD_NOT_SUPPORTED_HEADERS, METHOD_NOT_SUPPORTED_BODY);
             write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
