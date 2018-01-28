@@ -22,6 +22,8 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -34,14 +36,6 @@
 #include <dirent.h>
 #include <time.h>
 #include <stdint.h>
-
-// Forward declare so I don't have to include stdlib.h, string.h
-void *malloc(size_t size);
-void *realloc(void *ptr, size_t size);
-void free(void *ptr);
-void *memcpy(void * restrict dest, const void * restrict src, size_t n);
-int atexit(void (*func)(void));
-void exit(int status);
 
 #ifndef VERSION
 #define VERSION "0.0"

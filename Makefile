@@ -21,7 +21,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ###################################################################################
 
-CERVIT_VERSION=1.1
+CERVIT_VERSION=1.2
 CC=gcc 
 CFLAGS=-Wall -Wextra -Wno-unused-parameter -pedantic 
 CFLAGS_RELEASE=-O3 
