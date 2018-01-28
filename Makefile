@@ -35,4 +35,4 @@ cervit-debug: cervit.c
 	$(CC) $(CFLAGS) $(CFLAGS_DEBUG) -DVERSION=\"$(CERVIT_VERSION)-debug\" -o cervit-debug cervit.c $(LDLIBS)
 
 clean:
-	rm -f cervit cervit-debug
+	rm -f cervit cervit-debug core
