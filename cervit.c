@@ -1007,12 +1007,16 @@ void *handleRequest(void* args) {
             } else if (received < TRANSFER_CHUNK_SIZE) {
                 // Request ended without header terminator
                 errorResponseBuffer(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
-                write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
+                if (write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length) == -1) {
+                    perror("Failed to send response");
+                }
                 break;
             } else if (thread->requestBuffer.length > REQUEST_MAX_SIZE) {
                 // Request is too big.
                 errorResponseBuffer(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
-                write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
+                if (write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length) == -1) {
+                    perror("Failed to send response");
+                }
                 break;
             }
         }
@@ -1026,7 +1030,9 @@ void *handleRequest(void* args) {
         // Parse request string into request struct.
         if (parseRequestFromBuffer(&thread->requestBuffer, &thread->request) == -1) {
             errorResponseBuffer(&thread->responseBuffer, BAD_REQUEST_HEADERS, BAD_REQUEST_BODY);
-            write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
+            if (write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length) == -1) {
+                perror("Failed to send response");
+            }
             close(thread->connection);
             continue;
         }
@@ -1034,7 +1040,9 @@ void *handleRequest(void* args) {
         method = methodCodeFromBuffer(&thread->request.method);
         if (method == HTTP_METHOD_UNSUPPORTED) {
             errorResponseBuffer(&thread->responseBuffer, METHOD_NOT_SUPPORTED_HEADERS, METHOD_NOT_SUPPORTED_BODY);
-            write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
+            if (write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length) == -1) {
+                perror("Failed to send response");
+            }
             close(thread->connection);
             continue;
         }
@@ -1042,7 +1050,9 @@ void *handleRequest(void* args) {
         // We only support HTTP 1.1
         if (!array_caseEquals(thread->request.version.data, thread->request.version.length, HTTP_1_1_VERSION, STATIC_STRING_LENGTH(HTTP_1_1_VERSION))) {
             errorResponseBuffer(&thread->responseBuffer, VERSION_NOT_SUPPORTED_HEADERS, VERSION_NOT_SUPPORTED_BODY);
-            write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
+            if (write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length) == -1) {
+                perror("Failed to send response");
+            }
             close(thread->connection);
             continue;
         }
@@ -1051,7 +1061,9 @@ void *handleRequest(void* args) {
 
         if (statFileFromBuffer(&thread->request.path, &fileInfo) == -1) {
             errorResponseBuffer(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
-            write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);  
+            if (write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length) == -1) {
+                perror("Failed to send response");
+            }  
             close(thread->connection);
             continue;
         }
@@ -1082,7 +1094,9 @@ void *handleRequest(void* args) {
                 if (!dir) {
                     perror("Failed to open directory");
                     errorResponseBuffer(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
-                    write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length); 
+                    if (write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length) == -1) {
+                        perror("Failed to send response");
+                    } 
                     close(thread->connection);
                     continue;
                 }
@@ -1195,7 +1209,9 @@ void *handleRequest(void* args) {
                 }
 
                 // Send response.
-                write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);  
+                if (write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length) == -1) {
+                    perror("Failed to send response");
+                }  
                 
                 // Clean up.
                 close(thread->connection);
@@ -1212,7 +1228,9 @@ void *handleRequest(void* args) {
         if (fd == -1) {
             perror("Failed to open file");
             errorResponseBuffer(&thread->responseBuffer, NOT_FOUND_HEADERS, NOT_FOUND_BODY);
-            write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
+            if (write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length) == -1) {
+                perror("Failed to send response");
+            }
             close(thread->connection);
             continue; 
         }
@@ -1231,7 +1249,12 @@ void *handleRequest(void* args) {
         buffer_appendFromString(&thread->responseBuffer, HTTP_END_HEADER);
         
         // Send response headers.
-        write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length);
+        if (write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length) == -1) {
+            perror("Failed to send response");
+            close(thread->connection);
+            close(fd);
+            continue; 
+        }
 
         // If we got a GET request, send file.
         if (method == HTTP_METHOD_GET) {

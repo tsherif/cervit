@@ -21,10 +21,18 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ###################################################################################
 
-CERVIT_VERSION=1.0
+CERVIT_VERSION=1.1
 CC=gcc 
-CFLAGS=-g -Wall -Wextra -Wno-unused-parameter -pedantic 
+CFLAGS=-Wall -Wextra -Wno-unused-parameter -pedantic 
+CFLAGS_RELEASE=-O3 
+CFLAGS_DEBUG=-g
 LDLIBS=-pthread
 
 cervit: cervit.c
-	$(CC) $(CFLAGS) -DVERSION=\"$(CERVIT_VERSION)\" -o cervit cervit.c $(LDLIBS)
+	$(CC) $(CFLAGS) $(CFLAGS_RELEASE) -DVERSION=\"$(CERVIT_VERSION)\" -o cervit cervit.c $(LDLIBS)
+
+cervit-debug: cervit.c
+	$(CC) $(CFLAGS) $(CFLAGS_DEBUG) -DVERSION=\"$(CERVIT_VERSION)-debug\" -o cervit-debug cervit.c $(LDLIBS)
+
+clean:
+	rm -f cervit cervit-debug
