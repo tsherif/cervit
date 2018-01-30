@@ -378,6 +378,11 @@ void buffer_appendFromArray(Buffer* buffer, const char* array, int32_t length) {
     buffer->length += length;
 }
 
+// Append single character to end of buffer.
+void buffer_appendFromChar(Buffer* buffer, char c) {
+    buffer_appendFromArray(buffer, &c, 1);
+}
+
 // Append non-null bytes from string to end of buffer.
 void buffer_appendFromString(Buffer* buffer, const char* string) {
     buffer_appendFromArray(buffer, string, string_length(string));
@@ -1118,11 +1123,11 @@ void *handleRequest(void* args) {
                     // are kept in a single buffer, separated by null characters.
                     if (entry.d_type == DT_DIR) {
                         buffer_appendFromString(&thread->dirnameBuffer, entry.d_name); 
-                        buffer_appendFromArray(&thread->dirnameBuffer, "", 1); 
+                        buffer_appendFromChar(&thread->dirnameBuffer, '\0'); 
                         ++dirCount;
                     } else if (entry.d_type == DT_REG) {
                         buffer_appendFromString(&thread->filenameBuffer, entry.d_name); 
-                        buffer_appendFromArray(&thread->filenameBuffer, "", 1); 
+                        buffer_appendFromChar(&thread->filenameBuffer, '\0'); 
                         ++fileCount;
                     }
 
