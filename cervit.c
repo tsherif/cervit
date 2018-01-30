@@ -425,26 +425,26 @@ void buffer_appendDate(Buffer* buffer) {
     buffer_appendFromString(buffer, DAY_STRINGS[date.tm_wday]);
     buffer_appendFromString(buffer, ", ");
     buffer_appendFromUint(buffer, date.tm_mday);
-    buffer_appendFromString(buffer, " ");
+    buffer_appendFromChar(buffer, ' ');
     buffer_appendFromString(buffer, MONTH_STRINGS[date.tm_mon]);
-    buffer_appendFromString(buffer, " ");
+    buffer_appendFromChar(buffer, ' ');
     buffer_appendFromUint(buffer, date.tm_year + 1900);
-    buffer_appendFromString(buffer, " ");
+    buffer_appendFromChar(buffer, ' ');
 
     if (date.tm_hour < 10) {
-        buffer_appendFromString(buffer, "0");
+        buffer_appendFromChar(buffer, '0');
     }
     buffer_appendFromUint(buffer, date.tm_hour);
-    buffer_appendFromString(buffer, ":");
+    buffer_appendFromChar(buffer, ':');
 
     if (date.tm_min < 10) {
-        buffer_appendFromString(buffer, "0");
+        buffer_appendFromChar(buffer, '0');
     }
     buffer_appendFromUint(buffer, date.tm_min);
-    buffer_appendFromString(buffer, ":"); 
+    buffer_appendFromChar(buffer, ':'); 
 
     if (date.tm_sec < 10) {
-        buffer_appendFromString(buffer, "0");
+        buffer_appendFromChar(buffer, '0');
     }
     buffer_appendFromUint(buffer, date.tm_sec);
 
