@@ -65,7 +65,6 @@
 
 #define TRANSFER_CHUNK_SIZE 32768
 #define REQUEST_MAX_SIZE (TRANSFER_CHUNK_SIZE * 4)
-#define STATIC_STRING_LENGTH(string) ((int32_t) sizeof(string) - 1)
 
 #define BYTESET_TOKEN_END " \t\r\n"
 #define BYTESET_PATH_END "?#" BYTESET_TOKEN_END
