@@ -85,7 +85,7 @@ const char* MONTH_STRINGS[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul",
 // .length: number of bytes currently stored
 // .size: number of bytes allocated to the array
 typedef struct {
-    char* data;
+    int8_t* data;
     int32_t length;
     int32_t size;
 } Buffer;
@@ -138,7 +138,7 @@ int8_t currentConnectionReadDone;
 ///////////////////////////////////////////////
 // STRINGS
 // A "string" is a null-terminated sequence
-// of bytes.
+// of chars.
 ///////////////////////////////////////////////
 
 // Count the number of characters before the 
@@ -150,6 +150,18 @@ int32_t string_length(const char* string) {
     }
 
     return length;
+}
+
+int32_t string_equals(const char* string1, const char* string2) {
+    int32_t i = 0;
+    while (string1[i] != '\0' && string2[i] != '\0') {
+        if (string1[i] != string2[i]) {
+            return 0;
+        }
+        ++i;
+    }
+
+    return string1[i] == '\0' && string2[i] == '\0';
 }
 
 // Convert a string of decimal digits
@@ -179,11 +191,11 @@ uint32_t string_toUint(const char* string) {
 /////////////////////////////////////////////
 
 // Check if two array are the same sequence of bytes.
-int8_t array_equalsString(char* array, int32_t length, char* string) {
+int8_t array_equalsString(int8_t* array, int32_t length, char* string) {
     int32_t i;
     for (i = 0; i < length; ++i) {
-        char c1 = array[i];
-        char c2 = string[i];
+        int8_t c1 = array[i];
+        int8_t c2 = string[i];
 
         if (c2 == '\0') {
             // String was too short
@@ -200,12 +212,12 @@ int8_t array_equalsString(char* array, int32_t length, char* string) {
 
 // Check if two arrays are the same sequence of bytes, disregarding
 // case for alphabetical values [A-Za-z].
-int8_t array_caseEqualsString(char* array, int32_t length, char* string) {
-    char toLower = 'a' - 'A';
+int8_t array_caseEqualsString(int8_t* array, int32_t length, char* string) {
+    int8_t toLower = 'a' - 'A';
     int32_t i;
     for (i = 0; i < length; ++i) {
-        char c1 = array[i];
-        char c2 = string[i];
+        int8_t c1 = array[i];
+        int8_t c2 = string[i];
 
         if (c2 == '\0') {
             // String was too short
@@ -230,10 +242,10 @@ int8_t array_caseEqualsString(char* array, int32_t length, char* string) {
 
 // Find first occurance in the array of any of the characters a charset (represented
 // as a null-terminated string. If found, return index, else return -1.
-int32_t array_findFromCharSet(const char* array, int32_t length, char* charSet) {
+int32_t array_findFromCharSet(const int8_t* array, int32_t length, char* charSet) {
     int32_t i = 0;
     while (i < length) {
-        char c = array[i];
+        int8_t c = array[i];
         for (int32_t j = 0; charSet[j]; ++j) {
             if (c == charSet[j]){
                 return i;
@@ -247,7 +259,7 @@ int32_t array_findFromCharSet(const char* array, int32_t length, char* charSet) 
 
 // Increment an array's pointer by increment and adjust length accordingly. If
 // succesful return 0, else return -1.
-int8_t array_incrementPointer(char** array, int32_t* length, int32_t increment) {
+int8_t array_incrementPointer(int8_t** array, int32_t* length, int32_t increment) {
     if (increment >= *length) {
         return -1;
     }
@@ -294,7 +306,7 @@ void buffer_delete(Buffer* buffer) {
 void buffer_checkAllocation(Buffer* buffer, int32_t requestedSize) {
     if (requestedSize > buffer->size) {
         int32_t newSize = buffer->size;
-        char* newData;
+        int8_t* newData;
         while (newSize < requestedSize) {
             newSize <<= 1;
         }
@@ -309,7 +321,7 @@ void buffer_checkAllocation(Buffer* buffer, int32_t requestedSize) {
 }
 
 // Append bytes from array to end of buffer.
-void buffer_appendFromArray(Buffer* buffer, const char* array, int32_t length) {
+void buffer_appendFromArray(Buffer* buffer, const int8_t* array, int32_t length) {
     buffer_checkAllocation(buffer, buffer->length + length);
     memcpy(buffer->data + buffer->length, array, length);
     buffer->length += length;
@@ -317,12 +329,12 @@ void buffer_appendFromArray(Buffer* buffer, const char* array, int32_t length) {
 
 // Append single character to end of buffer.
 void buffer_appendFromChar(Buffer* buffer, char c) {
-    buffer_appendFromArray(buffer, &c, 1);
+    buffer_appendFromArray(buffer, (int8_t *)&c, 1);
 }
 
 // Append non-null bytes from string to end of buffer.
 void buffer_appendFromString(Buffer* buffer, const char* string) {
-    buffer_appendFromArray(buffer, string, string_length(string));
+    buffer_appendFromArray(buffer, (int8_t *)string, string_length(string));
 }
 
 // Convert unsigned int to array of digit characters
@@ -335,11 +347,11 @@ void buffer_appendFromUint(Buffer* buffer, uint32_t n) {
         ++length;
     }
 
-    char result[length];
+    int8_t result[length];
 
     uint32_t i = 0;
     while (pow > 0) {
-        char digit = n / pow;
+        int8_t digit = n / pow;
         result[i] = digit + '0';
 
         n -= digit * pow;
@@ -407,11 +419,11 @@ void buffer_externalNull(Buffer* buffer) {
 
 // Parse the character value from a string of 
 // two hexadecimal digits
-char parseURIHexCode(const char* array) {
-    char result = 0;
+int8_t parseURIHexCodeFromArray(const int8_t* array) {
+    int8_t result = 0;
     int32_t multiplier = 16;
     for (int32_t i = 0; i < 2; ++i) {
-        char c = array[i];
+        int8_t c = array[i];
 
         if (c >= 'A' && c <= 'F') {
             result += multiplier * (10 + c - 'A');
@@ -431,10 +443,10 @@ char parseURIHexCode(const char* array) {
 
 // Find the first byte in an array that isn't a space (' ') or 
 // tab('\t'), return the index.
-int32_t skipArraySpaces(char* array, int32_t length) {
+int32_t skipArraySpaces(int8_t* array, int32_t length) {
     int32_t i = 0;
     while (i < length) {
-        char c = array[i];
+        int8_t c = array[i];
 
         if (c != ' ' && c != '\t') {
             break;
@@ -450,7 +462,7 @@ int32_t skipArraySpaces(char* array, int32_t length) {
 // HTTP newline, '\r\n' or '\n' (RFC 7230, 3.5). If so,
 // return the number of characters that make up the newline,
 // else return 0.
-int32_t isArrayHttpNewline(char* array, int32_t length) {
+int32_t isArrayHttpNewline(int8_t* array, int32_t length) {
     if (length < 1) {
         return 0;
     }
@@ -470,7 +482,7 @@ int32_t isArrayHttpNewline(char* array, int32_t length) {
 // pair of HTTP newlines. If so, return the number of 
 // characters that make up the newline pair, else return
 // 0.
-int32_t isArrayHttpHeaderEnd(char* array, int32_t length) {
+int32_t isArrayHttpHeaderEnd(int8_t* array, int32_t length) {
     if (length < 2) {
         return 0;
     }
@@ -491,7 +503,7 @@ int32_t isArrayHttpHeaderEnd(char* array, int32_t length) {
 }
 
 // Skip over any leading HTTP newlines
-int32_t skipArrayHttpNewlines(char* array, int32_t length) {
+int32_t skipArrayHttpNewlines(int8_t* array, int32_t length) {
     int32_t i = 0;
     int32_t count = isArrayHttpNewline(array, length);
     while (count && i < length) {
@@ -505,7 +517,7 @@ int32_t skipArrayHttpNewlines(char* array, int32_t length) {
 // Decode any percent-encoded characters
 // from the buffer.
 int8_t hexDecodeBuffer(Buffer* buffer) {
-    char* path = buffer->data;
+    int8_t* path = buffer->data;
     int32_t length = buffer->length;
     
     int32_t readIndex = 0;
@@ -523,7 +535,7 @@ int8_t hexDecodeBuffer(Buffer* buffer) {
             return -1;
         }
 
-        char c = parseURIHexCode(path + readIndex + 1);
+        int8_t c = parseURIHexCodeFromArray(path + readIndex + 1);
         if (c > 0) {
             path[writeIndex] = c;
             readIndex += 3;
@@ -541,12 +553,12 @@ int8_t hexDecodeBuffer(Buffer* buffer) {
 // Remove path '.' and '..' from a path. (RFC 3986, 5.3.4)
 void removeBufferDotSegments(Buffer* buffer) {
     // Skip ./ prefix
-    char* path = buffer->data + 2;
+    int8_t* path = buffer->data + 2;
     int32_t length = buffer-> length - 2;
     
     int32_t readIndex = 0;
     int32_t writeIndex = 0;
-    char c1, c2, c3;
+    int8_t c1, c2, c3;
 
     while (readIndex < length) {
         c1 = path[readIndex];
@@ -617,26 +629,26 @@ void errorResponseBuffer(Buffer* buffer, const char* headers, const char* body) 
 int32_t openFileFromBuffer(Buffer* buffer, int32_t flags) {
     buffer_externalNull(buffer);
 
-    return open(buffer->data, flags);
+    return open((const char*)buffer->data, flags);
 }
 
 // Stat file whose name is stored in buffer.
 int32_t statFileFromBuffer(Buffer* buffer, struct stat *fileInfo) {
     buffer_externalNull(buffer);
 
-    return stat(buffer->data, fileInfo);
+    return stat((const char*)buffer->data, fileInfo);
 }
 
 // Open directory whose name is stored in buffer.
 DIR* openDirFromBuffer(Buffer* buffer) {
     buffer_externalNull(buffer);
 
-    return opendir(buffer->data);
+    return opendir((const char*)buffer->data);
 }
 
 // Guess at content stype based on file extension
 // of file name stored in filename.
-char *contentTypeFromBuffer(Buffer* filename) {
+char *contentTypeStringFromBuffer(Buffer* filename) {
     int32_t offset = filename->length - 1;
     
     while (offset > 0 && filename->data[offset] != '.') {
@@ -647,7 +659,7 @@ char *contentTypeFromBuffer(Buffer* filename) {
         return "application/octet-stream";
     }
 
-    char* extension = filename->data + offset;
+    int8_t* extension = filename->data + offset;
     int32_t length = filename->length - offset;
 
     /////////////
@@ -760,7 +772,7 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
     request->path.length = 0;
     request->version.length = 0;
 
-    char* requestString = requestBuffer->data;
+    int8_t* requestString = requestBuffer->data;
     int32_t requestStringLength = requestBuffer->length;
 
     // Skip leading newlines
@@ -785,7 +797,7 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
 
 
     // Get path
-    buffer_appendFromArray(&request->path, ".", 1);
+    buffer_appendFromChar(&request->path, '.');
 
     index = skipArraySpaces(requestString, requestStringLength);
     if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
@@ -896,7 +908,7 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
 // Compare two strings for alphabetical ordering. Result
 // < 0 means string1 comes first. Result > 0 means string
 // 2 should come first, 0 means they're the same.
-int32_t compareFilenames(char* filename1, char* filename2) {
+int32_t compareFilenames(int8_t* filename1, int8_t* filename2) {
     int32_t i = 0;
     while (filename1[i] || filename2[i]) {
         if (!filename1[i]) {
@@ -923,8 +935,8 @@ int32_t compareFilenames(char* filename1, char* filename2) {
 
 // Sort a list of strings. Used for directory 
 // listing responses.
-void sortFilenameList(char** list, int32_t length) {
-    char *current;
+void sortFilenameList(int8_t** list, int32_t length) {
+    int8_t *current;
     for (int32_t i = 1; i < length; ++i) {
         current = list[i];
         int32_t j = i;
@@ -946,7 +958,7 @@ void sortFilenameList(char** list, int32_t length) {
 void *handleRequest(void* args) {
     Thread* thread = (Thread*) args;
 
-    char requestChunk[TRANSFER_CHUNK_SIZE];
+    int8_t requestChunk[TRANSFER_CHUNK_SIZE];
     int32_t method = 0;
     struct stat fileInfo;
 
@@ -968,7 +980,7 @@ void *handleRequest(void* args) {
 
         // Read request stream into a buffer. Read in chunks of TRANSFER_CHUNK_SIZE.
         // Since we only accept GET and HEAD requests, just read up to first double newline.
-        char validRequest = 0;
+        int8_t validRequest = 0;
         while(1) {
             int32_t received = recv(thread->connection, requestChunk, TRANSFER_CHUNK_SIZE, 0);
 
@@ -1097,7 +1109,7 @@ void *handleRequest(void* args) {
 
                 readdir_r(dir, &entry, &entryp);
                 while (entryp) {
-                    if (array_equalsString(entry.d_name, 2, ".") || array_equalsString(entry.d_name, 3, "..")) {
+                    if (string_equals(entry.d_name, ".") || string_equals(entry.d_name, "..")) {
                         readdir_r(dir, &entry, &entryp);
                         continue;
                     }
@@ -1126,16 +1138,16 @@ void *handleRequest(void* args) {
                 // Here we set up pointers to the begine of each name
                 // two buffers of file and directory names. We'll
                 // sort pointers to arrange the listing alphabetically.
-                char* directoryNames[dirCount];
-                char* filenames[fileCount];
+                int8_t* directoryNames[dirCount];
+                int8_t* filenames[fileCount];
                 int32_t currentFile = 1;
                 int32_t currentDir = 1;
 
                 directoryNames[0] = thread->dirnameBuffer.data;
                 filenames[0] = thread->filenameBuffer.data;
 
-                char* current = thread->dirnameBuffer.data;
-                char* end = thread->dirnameBuffer.data + thread->dirnameBuffer.length;
+                int8_t* current = thread->dirnameBuffer.data;
+                int8_t* end = thread->dirnameBuffer.data + thread->dirnameBuffer.length;
                 while (current != end && currentDir < dirCount) {
                     if (*current == '\0') {
                         directoryNames[currentDir] = current + 1;
@@ -1165,9 +1177,9 @@ void *handleRequest(void* args) {
                 for (int32_t i = 0; i < dirCount; ++i) {
                     buffer_appendFromString(&thread->dirListingBuffer, "<li><a href=\"");
                     buffer_appendFromArray(&thread->dirListingBuffer, thread->request.path.data + 1, thread->request.path.length - 1); // Skip '.'
-                    buffer_appendFromString(&thread->dirListingBuffer, directoryNames[i]);
+                    buffer_appendFromString(&thread->dirListingBuffer, (char *)directoryNames[i]);
                     buffer_appendFromString(&thread->dirListingBuffer, "/\">");
-                    buffer_appendFromString(&thread->dirListingBuffer, directoryNames[i]);
+                    buffer_appendFromString(&thread->dirListingBuffer, (char *)directoryNames[i]);
                     buffer_appendFromString(&thread->dirListingBuffer, "/</a></li>\n");
                 }
 
@@ -1175,9 +1187,9 @@ void *handleRequest(void* args) {
                 for (int32_t i = 0; i < fileCount; ++i) {
                     buffer_appendFromString(&thread->dirListingBuffer, "<li><a href=\"");
                     buffer_appendFromArray(&thread->dirListingBuffer, thread->request.path.data + 1, thread->request.path.length - 1); // Skip '.'
-                    buffer_appendFromString(&thread->dirListingBuffer, filenames[i]);
+                    buffer_appendFromString(&thread->dirListingBuffer, (char *)filenames[i]);
                     buffer_appendFromString(&thread->dirListingBuffer, "\">");
-                    buffer_appendFromString(&thread->dirListingBuffer, filenames[i]);
+                    buffer_appendFromString(&thread->dirListingBuffer, (char *)filenames[i]);
                     buffer_appendFromString(&thread->dirListingBuffer, "</a></li>\n");
                 }
                 buffer_appendFromString(&thread->dirListingBuffer, "</ul></body></html>\n");
@@ -1227,7 +1239,7 @@ void *handleRequest(void* args) {
         buffer_appendFromString(&thread->responseBuffer, HTTP_OK_HEADER);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CACHE_HEADERS);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_TYPE_KEY);
-        buffer_appendFromString(&thread->responseBuffer, contentTypeFromBuffer(&thread->request.path));
+        buffer_appendFromString(&thread->responseBuffer, contentTypeStringFromBuffer(&thread->request.path));
         buffer_appendFromString(&thread->responseBuffer, HTTP_NEWLINE);
         buffer_appendFromString(&thread->responseBuffer, HTTP_CONTENT_LENGTH_KEY);
         buffer_appendFromUint(&thread->responseBuffer, fileInfo.st_size);
