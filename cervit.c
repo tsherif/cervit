@@ -152,58 +152,6 @@ int32_t string_length(const char* string) {
     return length;
 }
 
-// Compare two strings for alphabetical ordering. Result
-// < 0 means string1 comes first. Result > 0 means string
-// 2 should come first, 0 means they're the same.
-int32_t string_compare(char* string1, char* string2) {
-    int32_t i = 0;
-    while (string1[i] || string2[i]) {
-        if (!string1[i]) {
-            // Name 1 is shorter
-            return -1;
-        }
-
-        if (!string2[i]) {
-            // Name 2 is shorter
-            return 1;
-        }
-
-        int32_t cmp = string1[i] - string2[i];
-
-        if (cmp != 0) {
-            return cmp;
-        }
-
-        ++i;
-    }
-
-    return 0;
-}
-
-// Parse the character value from a string of 
-// two hexadecimal digits
-char string_parseURIHexCode(const char* string) {
-    char result = 0;
-    int32_t multiplier = 16;
-    for (int32_t i = 0; i < 2; ++i) {
-        char c = string[i];
-
-        if (c >= 'A' && c <= 'F') {
-            result += multiplier * (10 + c - 'A');
-        } else if (c >= 'a' && c <= 'f') {
-            result += multiplier * (10 + c - 'a');
-        } else if (c >= '0' && c <= '9') {
-            result += multiplier * (c - '0');
-        } else {
-            return '\0';
-        }
-
-        multiplier >>= 4;
-    }
-
-    return result;
-}
-
 // Convert a string of decimal digits
 // to a uint32_t value.
 uint32_t string_toUint(const char* string) {
@@ -231,32 +179,38 @@ uint32_t string_toUint(const char* string) {
 /////////////////////////////////////////////
 
 // Check if two array are the same sequence of bytes.
-int8_t array_equals(char* array1, int32_t length1, char* array2, int32_t length2) {
-    if (length1 != length2) {
-        return 0;
-    }
+int8_t array_equalsString(char* array, int32_t length, char* string) {
+    int32_t i;
+    for (i = 0; i < length; ++i) {
+        char c1 = array[i];
+        char c2 = string[i];
 
-    for (int32_t i = 0; i < length1; ++i) {
-        if (array1[i] != array2[i]) {
+        if (c2 == '\0') {
+            // String was too short
+            return 0;
+        }
+
+        if (c1 != c2) {
             return 0;
         }
     }
 
-    return 1;
+    return string[i] == '\0';
 }
 
 // Check if two arrays are the same sequence of bytes, disregarding
 // case for alphabetical values [A-Za-z].
-int8_t array_caseEquals(char* array1, int32_t length1, char* array2, int32_t length2) {
-    if (length1 != length2) {
-        return 0;
-    }
-
+int8_t array_caseEqualsString(char* array, int32_t length, char* string) {
     char toLower = 'a' - 'A';
+    int32_t i;
+    for (i = 0; i < length; ++i) {
+        char c1 = array[i];
+        char c2 = string[i];
 
-    for (int32_t i = 0; i < length1; ++i) {
-        char c1 = array1[i];
-        char c2 = array2[i];
+        if (c2 == '\0') {
+            // String was too short
+            return 0;
+        }
 
         if (c1 >= 'A' && c1 <= 'Z') {
             c1 += toLower;
@@ -271,34 +225,17 @@ int8_t array_caseEquals(char* array1, int32_t length1, char* array2, int32_t len
         }
     }
 
-    return 1;
+    return string[i] == '\0';
 }
 
-// Find if array2 exists as a subarray of array1. If so, return index,
-// else return -1.
-int32_t array_find(char* array1, int32_t length1, char* array2, int32_t length2) {
-    if (length1 < length2) {
-        return -1;
-    }
-
-    int32_t length = length1 - length2 + 1;
-    for (int32_t i = 0; i < length; ++i) {
-        if (array_equals(array1 + i, length2, array2, length2)) {
-            return i;
-        }
-    }
-
-    return -1;
-}
-
-// Find first occurance in the array of any of the characters in byteSet. If found,
-// return index, else return -1.
-int32_t array_findFromByteSet(const char* array, int32_t length, char* byteSet, int32_t count) {
+// Find first occurance in the array of any of the characters a charset (represented
+// as a null-terminated string. If found, return index, else return -1.
+int32_t array_findFromCharSet(const char* array, int32_t length, char* charSet) {
     int32_t i = 0;
     while (i < length) {
         char c = array[i];
-        for (int32_t j = 0; j < count; ++j) {
-            if (c == byteSet[j]){
+        for (int32_t j = 0; charSet[j]; ++j) {
+            if (c == charSet[j]){
                 return i;
             }
         }
@@ -468,6 +405,30 @@ void buffer_externalNull(Buffer* buffer) {
 // PARSING UTILITY FUNCTIONS
 /////////////////////////////////
 
+// Parse the character value from a string of 
+// two hexadecimal digits
+char parseURIHexCode(const char* array) {
+    char result = 0;
+    int32_t multiplier = 16;
+    for (int32_t i = 0; i < 2; ++i) {
+        char c = array[i];
+
+        if (c >= 'A' && c <= 'F') {
+            result += multiplier * (10 + c - 'A');
+        } else if (c >= 'a' && c <= 'f') {
+            result += multiplier * (10 + c - 'a');
+        } else if (c >= '0' && c <= '9') {
+            result += multiplier * (c - '0');
+        } else {
+            return '\0';
+        }
+
+        multiplier >>= 4;
+    }
+
+    return result;
+}
+
 // Find the first byte in an array that isn't a space (' ') or 
 // tab('\t'), return the index.
 int32_t skipArraySpaces(char* array, int32_t length) {
@@ -562,7 +523,7 @@ int8_t hexDecodeBuffer(Buffer* buffer) {
             return -1;
         }
 
-        char c = string_parseURIHexCode(path + readIndex + 1);
+        char c = parseURIHexCode(path + readIndex + 1);
         if (c > 0) {
             path[writeIndex] = c;
             readIndex += 3;
@@ -692,88 +653,88 @@ char *contentTypeFromBuffer(Buffer* filename) {
     /////////////
     // Text
     /////////////
-    if (array_caseEquals(extension, length, ".html", 5) || array_caseEquals(extension, length, ".htm", 4)) {
+    if (array_caseEqualsString(extension, length, ".html") || array_caseEqualsString(extension, length, ".htm")) {
         return "text/html";
     }
 
-    if (array_caseEquals(extension, length, ".js", 3)) {
+    if (array_caseEqualsString(extension, length, ".js")) {
         return "application/javascript";
     }
 
-    if (array_caseEquals(extension, length, ".css", 4)) {
+    if (array_caseEqualsString(extension, length, ".css")) {
         return "text/css";
     }
 
-    if (array_caseEquals(extension, length, ".xml", 4)) {
+    if (array_caseEqualsString(extension, length, ".xml")) {
         return "text/xml";
     }
 
-    if (array_caseEquals(extension, length, ".json", 5)) {
+    if (array_caseEqualsString(extension, length, ".json")) {
         return "application/json";
     }
 
-    if (array_caseEquals(extension, length, ".txt", 4)) {
+    if (array_caseEqualsString(extension, length, ".txt")) {
         return "text/plain";
     }
 
     /////////////
     // Images
     /////////////
-    if (array_caseEquals(extension, length, ".jpeg", 5) || array_caseEquals(extension, length, ".jpg", 4)) {
+    if (array_caseEqualsString(extension, length, ".jpeg") || array_caseEqualsString(extension, length, ".jpg")) {
         return "image/jpeg";
     }
 
-    if (array_caseEquals(extension, length, ".png", 4)) {
+    if (array_caseEqualsString(extension, length, ".png")) {
         return "image/png";
     }
 
-    if (array_caseEquals(extension, length, ".gif", 4)) {
+    if (array_caseEqualsString(extension, length, ".gif")) {
         return "image/gif";
     }
 
-    if (array_caseEquals(extension, length, ".bmp", 4)) {
+    if (array_caseEqualsString(extension, length, ".bmp")) {
         return "image/bmp";
     }
 
-    if (array_caseEquals(extension, length, ".svg", 4)) {
+    if (array_caseEqualsString(extension, length, ".svg")) {
         return "image/svg+xml";
     }
 
     /////////////
     // Video
     /////////////
-    if (array_caseEquals(extension, length, ".ogv", 4)) {
+    if (array_caseEqualsString(extension, length, ".ogv")) {
         return "video/ogg";
     }
 
-    if (array_caseEquals(extension, length, ".mp4", 4)) {
+    if (array_caseEqualsString(extension, length, ".mp4")) {
         return "video/mp4";
     }
 
-    if (array_caseEquals(extension, length, ".mpg", 4) || array_caseEquals(extension, length, ".mpeg", 5)) {
+    if (array_caseEqualsString(extension, length, ".mpg") || array_caseEqualsString(extension, length, ".mpeg")) {
         return "video/mpeg";
     }
 
-    if (array_caseEquals(extension, length, ".mov", 4)) {
+    if (array_caseEqualsString(extension, length, ".mov")) {
         return "video/quicktime";
     }
 
     /////////////
     // Audio
     /////////////
-    if (array_caseEquals(extension, length, ".ogg", 4)) {
+    if (array_caseEqualsString(extension, length, ".ogg")) {
         return "application/ogg";
     }
 
-    if (array_caseEquals(extension, length, ".oga", 4)) {
+    if (array_caseEqualsString(extension, length, ".oga")) {
         return "audio/ogg";
     }
 
-    if (array_caseEquals(extension, length, ".mp3", 4)) {
+    if (array_caseEqualsString(extension, length, ".mp3")) {
         return "audio/mpeg";
     }
 
-    if (array_caseEquals(extension, length, ".wav", 4)) {
+    if (array_caseEqualsString(extension, length, ".wav")) {
         return "audio/wav";
     }
 
@@ -782,11 +743,11 @@ char *contentTypeFromBuffer(Buffer* filename) {
 
 // We only support GET and HEAD.
 int32_t methodCodeFromBuffer(Buffer* buffer) {
-    if (array_caseEquals(buffer->data, buffer->length, "GET", 3)) {
+    if (array_caseEqualsString(buffer->data, buffer->length, "GET")) {
         return HTTP_METHOD_GET;
     }
 
-    if (array_caseEquals(buffer->data, buffer->length, "HEAD", 4)) {
+    if (array_caseEqualsString(buffer->data, buffer->length, "HEAD")) {
         return HTTP_METHOD_HEAD;
     }
 
@@ -814,7 +775,7 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
         return -1;
     }
 
-    index = array_findFromByteSet(requestString, requestStringLength, BYTESET_TOKEN_END, STATIC_STRING_LENGTH(BYTESET_TOKEN_END));
+    index = array_findFromCharSet(requestString, requestStringLength, BYTESET_TOKEN_END);
     if (index == -1) {
         return -1;
     }
@@ -831,7 +792,7 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
         return -1;
     }
 
-    index = array_findFromByteSet(requestString, requestStringLength, BYTESET_PATH_END, STATIC_STRING_LENGTH(BYTESET_PATH_END));
+    index = array_findFromCharSet(requestString, requestStringLength, BYTESET_PATH_END);
     if (index == -1) {
         return -1;
     }
@@ -845,7 +806,7 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
     removeBufferDotSegments(&request->path);
 
     // Skip over query (?) and fragment (#) parts, if they exist.
-    index = array_findFromByteSet(requestString, requestStringLength, BYTESET_TOKEN_END, STATIC_STRING_LENGTH(BYTESET_TOKEN_END));
+    index = array_findFromCharSet(requestString, requestStringLength, BYTESET_TOKEN_END);
     if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
@@ -856,7 +817,7 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
         return -1;
     }
 
-    index = array_findFromByteSet(requestString, requestStringLength, BYTESET_TOKEN_END, STATIC_STRING_LENGTH(BYTESET_TOKEN_END));
+    index = array_findFromCharSet(requestString, requestStringLength, BYTESET_TOKEN_END);
     if (index == -1) {
         return -1;
     }
@@ -887,13 +848,13 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
         }
 
         // Get header key
-        index = array_findFromByteSet(requestString, requestStringLength, BYTESET_HEADER_KEY_END, STATIC_STRING_LENGTH(BYTESET_HEADER_KEY_END));
+        index = array_findFromCharSet(requestString, requestStringLength, BYTESET_HEADER_KEY_END);
         if (index == -1) {
             return -1;
         }
 
         // Check if it's the host header
-        if (array_caseEquals(requestString, index, "Host", STATIC_STRING_LENGTH("Host"))) {
+        if (array_caseEqualsString(requestString, index, "Host")) {
             hostFound = 1;
         }
         if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
@@ -906,7 +867,7 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
         }
 
         // We don't care what the header value is.
-        index = array_findFromByteSet(requestString, requestStringLength, HTTP_NEWLINE, STATIC_STRING_LENGTH(HTTP_NEWLINE));
+        index = array_findFromCharSet(requestString, requestStringLength, HTTP_NEWLINE);
         if (index == -1) {
             return -1;
         } 
@@ -932,15 +893,43 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
     return 0;
 }
 
+// Compare two strings for alphabetical ordering. Result
+// < 0 means string1 comes first. Result > 0 means string
+// 2 should come first, 0 means they're the same.
+int32_t compareFilenames(char* filename1, char* filename2) {
+    int32_t i = 0;
+    while (filename1[i] || filename2[i]) {
+        if (!filename1[i]) {
+            // Name 1 is shorter
+            return -1;
+        }
+
+        if (!filename2[i]) {
+            // Name 2 is shorter
+            return 1;
+        }
+
+        int32_t cmp = filename1[i] - filename2[i];
+
+        if (cmp != 0) {
+            return cmp;
+        }
+
+        ++i;
+    }
+
+    return 0;
+}
+
 // Sort a list of strings. Used for directory 
 // listing responses.
-void sortStringList(char** list, int32_t length) {
+void sortFilenameList(char** list, int32_t length) {
     char *current;
     for (int32_t i = 1; i < length; ++i) {
         current = list[i];
         int32_t j = i;
         while (j > 0) {
-            if (string_compare(current, list[j - 1]) < 0) {
+            if (compareFilenames(current, list[j - 1]) < 0) {
                 list[j] = list[j - 1];
             } else {
                 break;
@@ -1047,7 +1036,7 @@ void *handleRequest(void* args) {
         }
 
         // We only support HTTP 1.1
-        if (!array_caseEquals(thread->request.version.data, thread->request.version.length, HTTP_1_1_VERSION, STATIC_STRING_LENGTH(HTTP_1_1_VERSION))) {
+        if (!array_caseEqualsString(thread->request.version.data, thread->request.version.length, HTTP_1_1_VERSION)) {
             errorResponseBuffer(&thread->responseBuffer, VERSION_NOT_SUPPORTED_HEADERS, VERSION_NOT_SUPPORTED_BODY);
             if (write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length) == -1) {
                 perror("Failed to send response");
@@ -1108,7 +1097,7 @@ void *handleRequest(void* args) {
 
                 readdir_r(dir, &entry, &entryp);
                 while (entryp) {
-                    if (array_equals(entry.d_name, 2, ".", 2) || array_equals(entry.d_name, 3, "..", 3)) {
+                    if (array_equalsString(entry.d_name, 2, ".") || array_equalsString(entry.d_name, 3, "..")) {
                         readdir_r(dir, &entry, &entryp);
                         continue;
                     }
@@ -1166,8 +1155,8 @@ void *handleRequest(void* args) {
                 }
 
                 // Sort the two lists.
-                sortStringList(directoryNames, dirCount);
-                sortStringList(filenames, fileCount);
+                sortFilenameList(directoryNames, dirCount);
+                sortFilenameList(filenames, fileCount);
 
                 // Reset path again for display.
                 thread->request.path.length = baseLength;
