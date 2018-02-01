@@ -76,11 +76,6 @@
 #define NUM_THREADS 4
 #endif
 
-// Named types to represent boolean, array index/size, file descriptor.
-typedef int8_t  bool8;
-typedef int64_t index64;
-typedef int32_t fd32;
-
 const char* DAY_STRINGS[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
 const char* MONTH_STRINGS[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
@@ -90,8 +85,8 @@ const char* MONTH_STRINGS[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul",
 // .size: number of bytes allocated to the array
 typedef struct {
     int8_t* data;
-    index64 length;
-    index64 size;
+    int64_t length;
+    int64_t size;
 } Buffer;
 
 // Information about the HTTP request
@@ -120,24 +115,24 @@ typedef struct {
     Buffer dirnameBuffer;
     Buffer filenameBuffer;
     int32_t id;
-    fd32 connection;
+    int32_t connection;
 } Thread;
 
 // The listening socket
-fd32 sock;
+int32_t sock;
 
 // Array of thread structs
-index64 numThreads;
+int64_t numThreads;
 Thread* threads;
 
 
 // Shared thread control objects
-fd32 currentConnection;
+int32_t currentConnection;
 pthread_mutex_t currentConnectionLock;
 pthread_cond_t currentConnectionWritten;
 pthread_cond_t currentConnectionRead;
-bool8 currentConnectionWriteDone;
-bool8 currentConnectionReadDone;
+int8_t currentConnectionWriteDone;
+int8_t currentConnectionReadDone;
 
 ///////////////////////////////////////////////
 // STRINGS
@@ -147,8 +142,8 @@ bool8 currentConnectionReadDone;
 
 // Count the number of characters excluding
 // the terminating null.
-index64 string_length(const char* string) {
-    index64 length = 0;
+int64_t string_length(const char* string) {
+    int64_t length = 0;
     while (string[length] != '\0') {
         ++length;
     }
@@ -157,8 +152,8 @@ index64 string_length(const char* string) {
 }
 
 // Check if the two string contain the same characters.
-bool8 string_equals(const char* string1, const char* string2) {
-    index64 i = 0;
+int8_t string_equals(const char* string1, const char* string2) {
+    int64_t i = 0;
     while (string1[i] != '\0' && string2[i] != '\0') {
         if (string1[i] != string2[i]) {
             return 0;
@@ -172,7 +167,7 @@ bool8 string_equals(const char* string1, const char* string2) {
 // Convert a string of decimal digits
 // to a uint32_t value.
 uint32_t string_toUint(const char* string) {
-    index64 i = string_length(string) - 1;
+    int64_t i = string_length(string) - 1;
     uint32_t multiplier = 1;
     uint32_t result = 0;
     while (i >= 0) {
@@ -197,8 +192,8 @@ uint32_t string_toUint(const char* string) {
 
 // Check if the array bytes values match the character values
 // in the string.
-bool8 array_equalsString(int8_t* array, index64 length, char* string) {
-    index64 i;
+int8_t array_equalsString(int8_t* array, int64_t length, char* string) {
+    int64_t i;
     for (i = 0; i < length; ++i) {
         int8_t c1 = array[i];
         int8_t c2 = string[i];
@@ -218,9 +213,9 @@ bool8 array_equalsString(int8_t* array, index64 length, char* string) {
 
 // Check if the array bytes values match the character values
 // in the string, disregarding case for alphabetical values [A-Za-z].
-bool8 array_caseEqualsString(int8_t* array, index64 length, char* string) {
+int8_t array_caseEqualsString(int8_t* array, int64_t length, char* string) {
     int8_t toLower = 'a' - 'A';
-    index64 i;
+    int64_t i;
     for (i = 0; i < length; ++i) {
         int8_t c1 = array[i];
         int8_t c2 = string[i];
@@ -248,11 +243,11 @@ bool8 array_caseEqualsString(int8_t* array, index64 length, char* string) {
 
 // Find first occurance in the array of any of the characters a charset (represented
 // as a null-terminated string). If found, return index, else return -1.
-index64 array_findFromCharSet(const int8_t* array, index64 length, char* charSet) {
-    index64 i = 0;
+int64_t array_findFromCharSet(const int8_t* array, int64_t length, char* charSet) {
+    int64_t i = 0;
     while (i < length) {
         int8_t c = array[i];
-        for (index64 j = 0; charSet[j]; ++j) {
+        for (int64_t j = 0; charSet[j]; ++j) {
             if (c == charSet[j]){
                 return i;
             }
@@ -265,7 +260,7 @@ index64 array_findFromCharSet(const int8_t* array, index64 length, char* charSet
 
 // Increment an array's pointer by increment and adjust length accordingly. If
 // succesful return 0, else return -1.
-index64 array_incrementPointer(int8_t** array, index64* length, index64 increment) {
+int64_t array_incrementPointer(int8_t** array, int64_t* length, int64_t increment) {
     if (increment >= *length) {
         return -1;
     }
@@ -284,7 +279,7 @@ index64 array_incrementPointer(int8_t** array, index64* length, index64 incremen
 ///////////////////////////////////////////////
 
 // Initialize a buffer to the given size.
-void buffer_init(Buffer* buffer, index64 size) {
+void buffer_init(Buffer* buffer, int64_t size) {
     buffer->data = malloc(size);
     buffer->length = 0;
 
@@ -309,9 +304,9 @@ void buffer_delete(Buffer* buffer) {
 
 // Check if buffer is large enough to hold the requested amount 
 // of data. If not, reallocate buffer with enough memory.
-void buffer_checkAllocation(Buffer* buffer, index64 requestedSize) {
+void buffer_checkAllocation(Buffer* buffer, int64_t requestedSize) {
     if (requestedSize > buffer->size) {
-        index64 newSize = buffer->size;
+        int64_t newSize = buffer->size;
         int8_t* newData;
         while (newSize < requestedSize) {
             newSize <<= 1;
@@ -327,7 +322,7 @@ void buffer_checkAllocation(Buffer* buffer, index64 requestedSize) {
 }
 
 // Append bytes from array to end of buffer.
-void buffer_appendFromArray(Buffer* buffer, const int8_t* array, index64 length) {
+void buffer_appendFromArray(Buffer* buffer, const int8_t* array, int64_t length) {
     buffer_checkAllocation(buffer, buffer->length + length);
     memcpy(buffer->data + buffer->length, array, length);
     buffer->length += length;
@@ -347,7 +342,7 @@ void buffer_appendFromString(Buffer* buffer, const char* string) {
 // and append to end of buffer.
 void buffer_appendFromUint(Buffer* buffer, uint32_t n) {
     uint32_t pow = 1;
-    index64 length = 1;
+    int64_t length = 1;
     while (pow * 10 <= n) {
         pow *= 10;
         ++length;
@@ -355,7 +350,7 @@ void buffer_appendFromUint(Buffer* buffer, uint32_t n) {
 
     int8_t result[length];
 
-    index64 i = 0;
+    int64_t i = 0;
     while (pow > 0) {
         int8_t digit = n / pow;
         result[i] = digit + '0';
@@ -428,7 +423,7 @@ void buffer_externalNull(Buffer* buffer) {
 int8_t parseURIHexCodeFromArray(const int8_t* array) {
     int8_t result = 0;
     int32_t multiplier = 16;
-    for (index64 i = 0; i < 2; ++i) {
+    for (int64_t i = 0; i < 2; ++i) {
         int8_t c = array[i];
 
         if (c >= 'A' && c <= 'F') {
@@ -449,8 +444,8 @@ int8_t parseURIHexCodeFromArray(const int8_t* array) {
 
 // Find the first byte in an array that isn't a space (' ') or 
 // tab('\t'), return the index.
-index64 skipArraySpaces(int8_t* array, index64 length) {
-    index64 i = 0;
+int64_t skipArraySpaces(int8_t* array, int64_t length) {
+    int64_t i = 0;
     while (i < length) {
         int8_t c = array[i];
 
@@ -468,7 +463,7 @@ index64 skipArraySpaces(int8_t* array, index64 length) {
 // HTTP newline, '\r\n' or '\n' (RFC 7230, 3.5). If so,
 // return the number of characters that make up the newline,
 // else return 0.
-index64 isArrayHttpNewline(int8_t* array, index64 length) {
+int64_t isArrayHttpNewline(int8_t* array, int64_t length) {
     if (length < 1) {
         return 0;
     }
@@ -488,18 +483,18 @@ index64 isArrayHttpNewline(int8_t* array, index64 length) {
 // pair of HTTP newlines. If so, return the number of 
 // characters that make up the newline pair, else return
 // 0.
-index64 isArrayHttpHeaderEnd(int8_t* array, index64 length) {
+int64_t isArrayHttpHeaderEnd(int8_t* array, int64_t length) {
     if (length < 2) {
         return 0;
     }
 
-    index64 i = isArrayHttpNewline(array, length);
+    int64_t i = isArrayHttpNewline(array, length);
 
     if (i == 0) {
         return 0;
     }
 
-    index64 j = isArrayHttpNewline(array + i, length - i);
+    int64_t j = isArrayHttpNewline(array + i, length - i);
 
     if (j == 0) {
         return 0;
@@ -509,9 +504,9 @@ index64 isArrayHttpHeaderEnd(int8_t* array, index64 length) {
 }
 
 // Skip over any leading HTTP newlines in array
-index64 skipArrayHttpNewlines(int8_t* array, index64 length) {
-    index64 i = 0;
-    index64 count = isArrayHttpNewline(array, length);
+int64_t skipArrayHttpNewlines(int8_t* array, int64_t length) {
+    int64_t i = 0;
+    int64_t count = isArrayHttpNewline(array, length);
     while (count && i < length) {
         i += count;
         count = isArrayHttpNewline(array + i, length - i);
@@ -524,10 +519,10 @@ index64 skipArrayHttpNewlines(int8_t* array, index64 length) {
 // from the buffer.
 int8_t hexDecodeBuffer(Buffer* buffer) {
     int8_t* path = buffer->data;
-    index64 length = buffer->length;
+    int64_t length = buffer->length;
     
-    index64 readIndex = 0;
-    index64 writeIndex = 0;
+    int64_t readIndex = 0;
+    int64_t writeIndex = 0;
 
     while (readIndex < length) {
         if (path[readIndex] != '%') {
@@ -560,10 +555,10 @@ int8_t hexDecodeBuffer(Buffer* buffer) {
 void removeBufferDotSegments(Buffer* buffer) {
     // Skip ./ prefix
     int8_t* path = buffer->data + 2;
-    index64 length = buffer-> length - 2;
+    int64_t length = buffer-> length - 2;
     
-    index64 readIndex = 0;
-    index64 writeIndex = 0;
+    int64_t readIndex = 0;
+    int64_t writeIndex = 0;
     int8_t c1, c2, c3;
 
     while (readIndex < length) {
@@ -632,7 +627,7 @@ void errorResponseBuffer(Buffer* buffer, const char* headers, const char* body) 
 }
 
 // Open file whose name is stored in buffer.
-fd32 openFileFromBuffer(Buffer* buffer, index64 flags) {
+int32_t openFileFromBuffer(Buffer* buffer, int64_t flags) {
     buffer_externalNull(buffer);
 
     return open((const char*)buffer->data, flags);
@@ -655,7 +650,7 @@ DIR* openDirFromBuffer(Buffer* buffer) {
 // Guess at content type based on file extension
 // of file name stored in buffer.
 char *contentTypeStringFromBuffer(Buffer* filename) {
-    index64 offset = filename->length - 1;
+    int64_t offset = filename->length - 1;
     
     while (offset > 0 && filename->data[offset] != '.') {
         --offset;
@@ -666,7 +661,7 @@ char *contentTypeStringFromBuffer(Buffer* filename) {
     }
 
     int8_t* extension = filename->data + offset;
-    index64 length = filename->length - offset;
+    int64_t length = filename->length - offset;
 
     /////////////
     // Text
@@ -780,10 +775,10 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
     request->version.length = 0;
 
     int8_t* requestString = requestBuffer->data;
-    index64 requestStringLength = requestBuffer->length;
+    int64_t requestStringLength = requestBuffer->length;
 
     // Skip leading newlines
-    index64 index = skipArrayHttpNewlines(requestString, requestStringLength);
+    int64_t index = skipArrayHttpNewlines(requestString, requestStringLength);
     if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
         return -1;
     }
@@ -854,9 +849,9 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
     }
 
     // Find "Host" header. Required to respond with 400 if not found (RFC 7230, 5.4)
-    bool8 hostFound = 0;
+    int8_t hostFound = 0;
     while (!hostFound && index < requestStringLength) {
-        index64 index = skipArrayHttpNewlines(requestString, requestStringLength);
+        int64_t index = skipArrayHttpNewlines(requestString, requestStringLength);
         if (array_incrementPointer(&requestString, &requestStringLength, index) == -1) {
             return -1;
         }
@@ -918,7 +913,7 @@ int8_t parseRequestFromBuffer(const Buffer* requestBuffer, Request* request) {
 // Note that these are byte sequences rather than char strings
 // because they're pointers into a buffer (see handleRequest).
 int32_t compareFilenames(int8_t* filename1, int8_t* filename2) {
-    index64 i = 0;
+    int64_t i = 0;
     while (filename1[i] || filename2[i]) {
         if (!filename1[i]) {
             // Name 1 is shorter
@@ -944,11 +939,11 @@ int32_t compareFilenames(int8_t* filename1, int8_t* filename2) {
 
 // Sort a list of strings. Used for directory 
 // listing responses (see handleResponse).
-void sortFilenameList(int8_t** list, index64 length) {
+void sortFilenameList(int8_t** list, int64_t length) {
     int8_t *current;
-    for (index64 i = 1; i < length; ++i) {
+    for (int64_t i = 1; i < length; ++i) {
         current = list[i];
-        index64 j = i;
+        int64_t j = i;
         while (j > 0) {
             if (compareFilenames(current, list[j - 1]) < 0) {
                 list[j] = list[j - 1];
@@ -992,9 +987,9 @@ void *handleRequest(void* args) {
 
         // Read request stream into a buffer. Read in chunks of TRANSFER_CHUNK_SIZE.
         // Since we only accept GET and HEAD requests, just read up to first double newline.
-        bool8 validRequest = 0;
+        int8_t validRequest = 0;
         while(1) {
-            index64 received = recv(thread->connection, requestChunk, TRANSFER_CHUNK_SIZE, 0);
+            int64_t received = recv(thread->connection, requestChunk, TRANSFER_CHUNK_SIZE, 0);
 
             if (received == -1) {
                 perror("Failed to receive data");
@@ -1004,10 +999,10 @@ void *handleRequest(void* args) {
             // See if we've found the end of the headers.
             // Start search a little ways into the previous 
             // chunk in case double newline is split between chunks.
-            index64 index = thread->requestBuffer.length > 3 ? thread->requestBuffer.length - 3 : 0;
+            int64_t index = thread->requestBuffer.length > 3 ? thread->requestBuffer.length - 3 : 0;
             buffer_appendFromArray(&thread->requestBuffer, requestChunk, received);
 
-            for (index64 i = index; i < thread->requestBuffer.length; ++i) {
+            for (int64_t i = index; i < thread->requestBuffer.length; ++i) {
                 if (isArrayHttpHeaderEnd(thread->requestBuffer.data + i, thread->requestBuffer.length - i)) {
                     validRequest = 1;
                     break;
@@ -1088,7 +1083,7 @@ void *handleRequest(void* args) {
 
             // Try to send index.html. Keep track of length of original path
             // in case this doesn't work.
-            index64 baseLength = thread->request.path.length;
+            int64_t baseLength = thread->request.path.length;
             buffer_appendFromString(&thread->request.path, "index.html");
 
             // Otherwise send directory listing.
@@ -1116,8 +1111,8 @@ void *handleRequest(void* args) {
                 struct dirent entry;
                 struct dirent* entryp;
 
-                index64 dirCount = 0;
-                index64 fileCount = 0;
+                int64_t dirCount = 0;
+                int64_t fileCount = 0;
 
                 readdir_r(dir, &entry, &entryp);
                 while (entryp) {
@@ -1152,8 +1147,8 @@ void *handleRequest(void* args) {
                 // sort pointers to arrange the listing alphabetically.
                 int8_t* directoryNames[dirCount];
                 int8_t* filenames[fileCount];
-                index64 currentFile = 1;
-                index64 currentDir = 1;
+                int64_t currentFile = 1;
+                int64_t currentDir = 1;
 
                 directoryNames[0] = thread->dirnameBuffer.data;
                 filenames[0] = thread->filenameBuffer.data;
@@ -1186,7 +1181,7 @@ void *handleRequest(void* args) {
                 thread->request.path.length = baseLength;
                 
                 // List directories.
-                for (index64 i = 0; i < dirCount; ++i) {
+                for (int64_t i = 0; i < dirCount; ++i) {
                     buffer_appendFromString(&thread->dirListingBuffer, "<li><a href=\"");
                     buffer_appendFromArray(&thread->dirListingBuffer, thread->request.path.data + 1, thread->request.path.length - 1); // Skip '.'
                     buffer_appendFromString(&thread->dirListingBuffer, (char *)directoryNames[i]);
@@ -1196,7 +1191,7 @@ void *handleRequest(void* args) {
                 }
 
                 // List files.
-                for (index64 i = 0; i < fileCount; ++i) {
+                for (int64_t i = 0; i < fileCount; ++i) {
                     buffer_appendFromString(&thread->dirListingBuffer, "<li><a href=\"");
                     buffer_appendFromArray(&thread->dirListingBuffer, thread->request.path.data + 1, thread->request.path.length - 1); // Skip '.'
                     buffer_appendFromString(&thread->dirListingBuffer, (char *)filenames[i]);
@@ -1235,7 +1230,7 @@ void *handleRequest(void* args) {
 
         // We're trying to send a file. Should exist since it was
         // stated above.
-        fd32 fd = openFileFromBuffer(&thread->request.path, O_RDONLY);
+        int32_t fd = openFileFromBuffer(&thread->request.path, O_RDONLY);
 
         if (fd == -1) {
             perror("Failed to open file");
@@ -1290,7 +1285,7 @@ void onClose(void) {
         return;
     }
 
-    for (index64 i = 0; i < numThreads; ++i) {
+    for (int64_t i = 0; i < numThreads; ++i) {
         pthread_cancel(threads[i].thread);
         buffer_delete(&threads[i].requestBuffer);
         buffer_delete(&threads[i].responseBuffer);
@@ -1344,7 +1339,7 @@ int main(int argc, char** argv) {
     signal(SIGTSTP, onSignal);
     signal(SIGTERM, onSignal);
 
-    bool8 initError = 0;
+    int8_t initError = 0;
 
     // Set up thread control
     int32_t errorCode = 0;
@@ -1378,7 +1373,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    for (index64 i = 0; i < numThreads; ++i) {
+    for (int64_t i = 0; i < numThreads; ++i) {
         threads[i].id = i;
         buffer_init(&threads[i].request.method, 16);
         buffer_init(&threads[i].request.path, 1024);
@@ -1432,7 +1427,7 @@ int main(int argc, char** argv) {
     printf("Socket listening\n");
 
     // Accepting socket
-    fd32 connection;
+    int32_t connection;
 
     while(1) {
         connection = accept(sock, 0, 0);
