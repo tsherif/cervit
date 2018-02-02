@@ -27,7 +27,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
-#include <sys/sendfile.h>
 #include <netinet/in.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -1257,7 +1256,7 @@ void *handleRequest(void* args) {
         
         // Send response headers.
         if (write(thread->connection, thread->responseBuffer.data, thread->responseBuffer.length) == -1) {
-            perror("Failed to send response");
+            perror("Failed to send response headers");
             close(thread->connection);
             close(fd);
             continue; 
@@ -1265,7 +1264,29 @@ void *handleRequest(void* args) {
 
         // If we got a GET request, send file.
         if (method == HTTP_METHOD_GET) {
-            sendfile(thread->connection, fd, 0, fileInfo.st_size);
+            int8_t fileChunk[TRANSFER_CHUNK_SIZE];
+
+            int64_t i = 0;
+            while (i < fileInfo.st_size) {
+                int64_t length = TRANSFER_CHUNK_SIZE;
+
+                if (i + length > fileInfo.st_size) {
+                    length = fileInfo.st_size - i;
+                }
+
+                int64_t numRead = read(fd, fileChunk, length);
+
+                if (numRead > 0) {
+                    i += numRead;
+                } else {
+                    break;
+                }
+
+                if (write(thread->connection, fileChunk, length) == -1) {
+                    perror("Failed to send response");
+                    break;
+                }
+            }
         } 
 
         // Clean up.
