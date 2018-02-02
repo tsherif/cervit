@@ -964,7 +964,7 @@ void sortFilenameList(int8_t** list, int64_t length) {
 void *handleRequest(void* args) {
     Thread* thread = (Thread*) args;
 
-    int8_t requestChunk[TRANSFER_CHUNK_SIZE];
+    int8_t transferChunk[TRANSFER_CHUNK_SIZE];
     int32_t method = 0;
     struct stat fileInfo;
 
@@ -988,7 +988,7 @@ void *handleRequest(void* args) {
         // Since we only accept GET and HEAD requests, just read up to first double newline.
         int8_t validRequest = 0;
         while(1) {
-            int64_t received = recv(thread->connection, requestChunk, TRANSFER_CHUNK_SIZE, 0);
+            int64_t received = recv(thread->connection, transferChunk, TRANSFER_CHUNK_SIZE, 0);
 
             if (received == -1) {
                 perror("Failed to receive data");
@@ -999,7 +999,7 @@ void *handleRequest(void* args) {
             // Start search a little ways into the previous 
             // chunk in case double newline is split between chunks.
             int64_t index = thread->requestBuffer.length > 3 ? thread->requestBuffer.length - 3 : 0;
-            buffer_appendFromArray(&thread->requestBuffer, requestChunk, received);
+            buffer_appendFromArray(&thread->requestBuffer, transferChunk, received);
 
             for (int64_t i = index; i < thread->requestBuffer.length; ++i) {
                 if (isArrayHttpHeaderEnd(thread->requestBuffer.data + i, thread->requestBuffer.length - i)) {
@@ -1264,9 +1264,8 @@ void *handleRequest(void* args) {
 
         // If we got a GET request, send file.
         if (method == HTTP_METHOD_GET) {
-            int8_t fileChunk[TRANSFER_CHUNK_SIZE];
-
             int64_t i = 0;
+            
             while (i < fileInfo.st_size) {
                 int64_t length = TRANSFER_CHUNK_SIZE;
 
@@ -1274,7 +1273,7 @@ void *handleRequest(void* args) {
                     length = fileInfo.st_size - i;
                 }
 
-                int64_t numRead = read(fd, fileChunk, length);
+                int64_t numRead = read(fd, transferChunk, length);
 
                 if (numRead > 0) {
                     i += numRead;
@@ -1282,7 +1281,7 @@ void *handleRequest(void* args) {
                     break;
                 }
 
-                if (write(thread->connection, fileChunk, length) == -1) {
+                if (write(thread->connection, transferChunk, length) == -1) {
                     perror("Failed to send response");
                     break;
                 }
